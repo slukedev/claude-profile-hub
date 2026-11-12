@@ -120,6 +120,10 @@ pub struct Settings {
     pub confirm_quit: bool,
     /// Flags passed to every profile.
     pub global_args: Vec<String>,
+    /// When Claude updates, quit profiles still on the old version and reopen them.
+    pub follow_claude_updates: bool,
+    /// Run a small background watcher at login, so the above happens within seconds.
+    pub background_watcher: bool,
 }
 
 impl Default for Settings {
@@ -137,6 +141,8 @@ impl Default for Settings {
             sort: SortOrder::Manual,
             confirm_quit: true,
             global_args: Vec::new(),
+            follow_claude_updates: true,
+            background_watcher: false,
         }
     }
 }
@@ -268,6 +274,8 @@ pub struct State {
     pub latest_version: Option<String>,
     /// claude-profile-hub was set up as the claude:// handler, so `links off` knows to undo it.
     pub links_claimed: bool,
+    /// The Claude Desktop version seen last, to notice when it updates.
+    pub claude_version: Option<String>,
 }
 
 impl State {

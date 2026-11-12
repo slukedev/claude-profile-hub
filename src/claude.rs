@@ -27,6 +27,30 @@ impl Install {
     }
 }
 
+impl Install {
+    /// When this version of Claude was put in place (Unix seconds): the creation time of
+    /// the bundle on macOS (the updater swaps in a new one), of the newest `app-X.Y.Z`
+    /// folder on Windows, and the program's change time elsewhere.
+    pub fn installed_at(&self) -> Option<i64> {
+        let newest_app_dir = self.exe.parent().and_then(|d| {
+            std::fs::read_dir(d)
+                .ok()?
+                .flatten()
+                .filter(|e| e.file_name().to_string_lossy().starts_with("app-"))
+                .filter_map(|e| e.metadata().ok())
+                .filter_map(|m| m.created().or_else(|_| m.modified()).ok())
+                .max()
+        });
+        let own = std::fs::metadata(&self.app).ok().map(|m| {
+            let created = m.created().ok();
+            let modified = m.modified().ok();
+            created.max(modified)
+        });
+        let t = newest_app_dir.or(own.flatten())?;
+        t.duration_since(std::time::UNIX_EPOCH).ok().map(|d| d.as_secs() as i64)
+    }
+}
+
 /// Looks for Claude Desktop, trying `override_path` first.
 pub fn find(override_path: Option<&Path>) -> Option<Install> {
     if let Some(p) = override_path {

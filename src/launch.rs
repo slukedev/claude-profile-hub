@@ -33,6 +33,11 @@ pub fn claude_args(global: &[String], profile: Option<&Profile>) -> Vec<String> 
 
 /// Opens a profile, or brings its window back if it's running. `url` is handed to it.
 pub fn launch(ctx: &mut Ctx, name: &str, url: Option<&str>) -> Result<Outcome> {
+    // Claude may have updated since the last launch; bring the other profiles along first.
+    // (Relaunches from here find the version already recorded, so this doesn't recurse.)
+    if ctx.config.settings.follow_claude_updates {
+        let _ = crate::follow::check(ctx, None);
+    }
     let install = ctx.require_claude()?;
     let profile = match ctx.target(name)? {
         Target::Default => None,

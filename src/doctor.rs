@@ -97,6 +97,30 @@ pub fn run(ctx: &Ctx) -> Vec<Check> {
         ));
     }
 
+    let s = &ctx.config.settings;
+    match (s.follow_claude_updates, s.background_watcher, crate::follow::watcher_running(ctx)) {
+        (false, _, _) => out.push(Check::new(
+            Level::Info,
+            "Following Claude updates is off",
+            "Profiles keep running the old version after Claude updates until you reopen them.",
+        )),
+        (true, true, true) => out.push(Check::new(
+            Level::Ok,
+            "Watching for Claude updates",
+            "Profiles reopen on the new version within seconds",
+        )),
+        (true, true, false) => out.push(Check::new(
+            Level::Warn,
+            "The background watcher isn't running",
+            format!("Run `{} config watcher on` to start it again.", crate::BIN),
+        )),
+        (true, false, _) => out.push(Check::new(
+            Level::Info,
+            "Claude updates are followed when you open a profile",
+            "Turn on the background watcher in Settings to follow them right away.",
+        )),
+    }
+
     let method = crate::update::InstallMethod::detect(&crate::update::current_exe());
     out.push(Check::new(
         Level::Info,

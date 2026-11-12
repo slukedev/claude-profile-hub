@@ -6,6 +6,7 @@ pub mod cli;
 pub mod config;
 pub mod ctx;
 pub mod doctor;
+pub mod follow;
 pub mod icons;
 pub mod launch;
 pub mod ops;

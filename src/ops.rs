@@ -101,6 +101,14 @@ pub fn set_route_links(ctx: &mut Ctx, on: bool) -> Result<()> {
     ctx.save_state()
 }
 
+/// Turns the background watcher on or off. Turning it off also stops a running one,
+/// because the watcher exits when it sees the setting off.
+pub fn set_watcher(ctx: &mut Ctx, on: bool) -> Result<()> {
+    ctx.config.settings.background_watcher = on;
+    ctx.save()?;
+    platform::set_autostart(ctx, on)
+}
+
 /// Human-friendly byte count.
 pub fn human_size(bytes: u64) -> String {
     const UNITS: [&str; 5] = ["B", "KB", "MB", "GB", "TB"];

@@ -77,6 +77,96 @@ function run(argv) {
 }
 "#;
 
+/// Writes the icon macOS shows for an app (asset catalog or .icns) as a 1024px PNG.
+const EXPORT_ICON_JS: &str = r#"
+ObjC.import('AppKit');
+function run(argv) {
+  var icon = $.NSWorkspace.sharedWorkspace.iconForFile(argv[0]);
+  var rep = $.NSBitmapImageRep.alloc.initWithBitmapDataPlanesPixelsWidePixelsHighBitsPerSampleSamplesPerPixelHasAlphaIsPlanarColorSpaceNameBytesPerRowBitsPerPixel(null, 1024, 1024, 8, 4, true, false, $.NSDeviceRGBColorSpace, 0, 0);
+  rep.setSize($.NSMakeSize(1024, 1024));
+  $.NSGraphicsContext.saveGraphicsState;
+  $.NSGraphicsContext.setCurrentContext($.NSGraphicsContext.graphicsContextWithBitmapImageRep(rep));
+  icon.drawInRectFromRectOperationFraction($.NSMakeRect(0, 0, 1024, 1024), $.NSZeroRect, $.NSCompositingOperationSourceOver, 1);
+  $.NSGraphicsContext.restoreGraphicsState;
+  var png = rep.representationUsingTypeProperties($.NSBitmapImageFileTypePNG, $({}));
+  if (!png.writeToFileAtomically(argv[1], true)) { throw new Error('could not write ' + argv[1]); }
+}
+"#;
+
+/// Compiles an Icon Composer icon (a fill and one foreground layer) into an Assets.car with
+/// actool, which ships with Xcode 26. macOS 26 draws the Default, Dark, Clear and Tinted
+/// styles from its layers. Returns false when actool isn't there or fails.
+pub fn compile_layered_icon(fill: [u8; 3], foreground_png: &[u8], out: &Path) -> bool {
+    let have_actool = Command::new("xcrun")
+        .args(["--find", "actool"])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .is_ok_and(|s| s.success());
+    if !have_actool {
+        return false;
+    }
+    let Ok(work) = tempfile_dir() else { return false };
+    let result = (|| -> Result<bool> {
+        let bundle = work.join("AppIcon.icon");
+        std::fs::create_dir_all(bundle.join("Assets"))?;
+        std::fs::create_dir_all(work.join("compiled"))?;
+        std::fs::write(bundle.join("Assets/foreground.png"), foreground_png)?;
+        let c = |v: u8| f32::from(v) / 255.0;
+        let json = format!(
+            r#"{{
+  "fill" : {{ "solid" : "srgb:{:.5},{:.5},{:.5},1.00000" }},
+  "groups" : [ {{ "layers" : [ {{ "image-name" : "foreground.png", "name" : "foreground" }} ] }} ],
+  "supported-platforms" : {{ "squares" : "shared" }}
+}}"#,
+            c(fill[0]),
+            c(fill[1]),
+            c(fill[2])
+        );
+        std::fs::write(bundle.join("icon.json"), json)?;
+        let ok = Command::new("xcrun")
+            .arg("actool")
+            .arg(&bundle)
+            .arg("--compile")
+            .arg(work.join("compiled"))
+            .args([
+                "--platform",
+                "macosx",
+                "--minimum-deployment-target",
+                "11.0",
+                "--app-icon",
+                "AppIcon",
+                "--include-all-app-icons",
+            ])
+            .arg("--output-partial-info-plist")
+            .arg(work.join("partial.plist"))
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()?
+            .success();
+        let car = work.join("compiled/Assets.car");
+        if ok && car.exists() {
+            std::fs::copy(&car, out)?;
+            return Ok(true);
+        }
+        Ok(false)
+    })();
+    remove_quietly(&work);
+    result.unwrap_or(false)
+}
+
+fn tempfile_dir() -> Result<PathBuf> {
+    let dir =
+        std::env::temp_dir().join(format!("claude-profile-hub-icon-{}-{}", std::process::id(), crate::config::now()));
+    std::fs::create_dir_all(&dir)?;
+    Ok(dir)
+}
+
+/// Saves Claude's icon, as macOS draws it, to `png`. Returns whether it worked.
+pub fn export_app_icon(app: &Path, png: &Path) -> bool {
+    jxa(EXPORT_ICON_JS, &[&app.to_string_lossy(), &png.to_string_lossy()]).is_ok() && png.exists()
+}
+
 const PICK_APPLESCRIPT: &str = r#"
 on run argv
   set thePrompt to item 1 of argv
@@ -174,7 +264,8 @@ pub fn own_app_copy(paths: &Paths, p: &Profile, install: &Install) -> Result<Opt
         std::fs::rename(&tmp, &dest)?;
         std::fs::write(&stamp_file, &stamp)?;
     }
-    let set = icons::write_for(&paths.icons_dir(), p)?;
+    let source = icons::claude_source(Some(install), &paths.icons_dir());
+    let set = icons::write_for(&paths.icons_dir(), p, source.as_ref())?;
     let _ = jxa(SETICON_JS, &[&set.icns.to_string_lossy(), &dest.to_string_lossy()]);
     Ok(Install::from_path(&dest))
 }
@@ -233,7 +324,7 @@ fn compile_applet(app: &Path, source: &str) -> Result<()> {
 fn finalize_applet(
     app: &Path,
     bundle_id: &str,
-    icns: Option<&Path>,
+    icon: Option<&icons::IconSet>,
     extra: impl FnOnce(&mut plist::Dictionary),
 ) -> Result<()> {
     let info = app.join("Contents/Info.plist");
@@ -241,14 +332,24 @@ fn finalize_applet(
     let dict = value.as_dictionary_mut().context("Info.plist isn't a dictionary")?;
     dict.insert("CFBundleIdentifier".into(), bundle_id.into());
     dict.insert("CFBundleIconFile".into(), "applet".into());
-    // CFBundleIconName points at Assets.car, which would override our icon.
-    dict.remove("CFBundleIconName");
+    // CFBundleIconName names the layered icon in Assets.car (macOS 26's Dark, Clear and
+    // Tinted styles); applet.icns stays for older macOS. Without a car, drop the name so
+    // osacompile's own Assets.car doesn't override our icon.
+    let car = icon.and_then(|i| i.car.as_deref());
+    if car.is_some() {
+        dict.insert("CFBundleIconName".into(), "AppIcon".into());
+    } else {
+        dict.remove("CFBundleIconName");
+    }
     extra(dict);
     value.to_file_xml(&info)?;
     let resources = app.join("Contents/Resources");
     remove_quietly(&resources.join("Assets.car"));
-    if let Some(icns) = icns {
-        std::fs::copy(icns, resources.join("applet.icns"))?;
+    if let Some(car) = car {
+        std::fs::copy(car, resources.join("Assets.car"))?;
+    }
+    if let Some(i) = icon {
+        std::fs::copy(&i.icns, resources.join("applet.icns"))?;
     }
     let _ = Command::new("xattr").arg("-cr").arg(app).status();
     let signed = Command::new("codesign")
@@ -279,8 +380,8 @@ pub fn install_shortcuts(ctx: &Ctx, p: &Profile) -> Result<Vec<PathBuf>> {
             as_string(&format!("Couldn't open {}", shortcut_title(&p.name))),
         );
         compile_applet(&app, &source)?;
-        let set = icons::write_for(&ctx.paths.icons_dir(), p)?;
-        finalize_applet(&app, &format!("{BUNDLE_PREFIX}.profile.{}", p.slug()), Some(&set.icns), |_| {})?;
+        let set = icons::write_for_ctx(ctx, p)?;
+        finalize_applet(&app, &format!("{BUNDLE_PREFIX}.profile.{}", p.slug()), Some(&set), |_| {})?;
         made.push(app.clone());
     }
     if let Some(desktop) = desktop_dir() {
@@ -344,8 +445,8 @@ fn build_router(ctx: &Ctx) -> Result<PathBuf> {
         launches: 0,
         own_app: false,
     };
-    let set = icons::write_for(&ctx.paths.icons_dir(), &icon)?;
-    finalize_applet(&app, &format!("{BUNDLE_PREFIX}.links"), Some(&set.icns), |dict| {
+    let set = icons::write_for_ctx(ctx, &icon)?;
+    finalize_applet(&app, &format!("{BUNDLE_PREFIX}.links"), Some(&set), |dict| {
         let mut url_type = plist::Dictionary::new();
         url_type.insert("CFBundleURLName".into(), "Claude links".into());
         url_type.insert(
@@ -495,6 +596,52 @@ fn dock_unpin(app: &Path) -> Result<()> {
     apps.retain(|t| !tile_url(t).is_some_and(|u| u.eq_ignore_ascii_case(&url)));
     if apps.len() != before {
         dock_write(&dock)?;
+    }
+    Ok(())
+}
+
+// ---- background watcher ----------------------------------------------------------------
+
+const WATCHER_LABEL: &str = "dev.slukedev.claude-profile-hub.watcher";
+
+fn launch_agent_path() -> Option<PathBuf> {
+    crate::claude::home().map(|h| h.join("Library/LaunchAgents").join(format!("{WATCHER_LABEL}.plist")))
+}
+
+fn gui_domain() -> Option<String> {
+    let out = Command::new("id").arg("-u").output().ok()?;
+    Some(format!("gui/{}", String::from_utf8_lossy(&out.stdout).trim()))
+}
+
+/// Starts the watcher at login (and now) as a launch agent, or removes it.
+pub fn set_autostart(_ctx: &Ctx, on: bool) -> Result<()> {
+    let plist_path = launch_agent_path().context("no home folder")?;
+    let domain = gui_domain().context("couldn't find your user ID")?;
+    let _ = Command::new("launchctl")
+        .args(["bootout", &format!("{domain}/{WATCHER_LABEL}")])
+        .stderr(Stdio::null())
+        .status();
+    if !on {
+        remove_quietly(&plist_path);
+        return Ok(());
+    }
+    let mut d = plist::Dictionary::new();
+    d.insert("Label".into(), WATCHER_LABEL.into());
+    d.insert(
+        "ProgramArguments".into(),
+        plist::Value::Array(vec![gui_command().to_string_lossy().into_owned().into(), "watch".into()]),
+    );
+    d.insert("RunAtLoad".into(), true.into());
+    // Restart after a crash, but not after it exits because the setting was turned off.
+    let mut keep = plist::Dictionary::new();
+    keep.insert("SuccessfulExit".into(), false.into());
+    d.insert("KeepAlive".into(), keep.into());
+    d.insert("ProcessType".into(), "Background".into());
+    std::fs::create_dir_all(plist_path.parent().context("no parent")?)?;
+    plist::Value::Dictionary(d).to_file_xml(&plist_path)?;
+    let ok = Command::new("launchctl").arg("bootstrap").arg(&domain).arg(&plist_path).status()?.success();
+    if !ok {
+        bail!("launchctl couldn't start the watcher");
     }
     Ok(())
 }

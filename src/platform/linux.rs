@@ -32,6 +32,16 @@ pub fn focus(_pid: u32, _url: Option<&str>) -> Result<bool> {
     Ok(false)
 }
 
+/// Layered icons are a macOS 26 feature.
+pub fn compile_layered_icon(_fill: [u8; 3], _foreground_png: &[u8], _out: &Path) -> bool {
+    false
+}
+
+/// Claude's icon file is read directly here; there's nothing to export.
+pub fn export_app_icon(_app: &Path, _png: &Path) -> bool {
+    false
+}
+
 pub fn own_app_copy(_paths: &Paths, _p: &Profile, _install: &Install) -> Result<Option<Install>> {
     Ok(None)
 }
@@ -116,7 +126,7 @@ fn make_executable(path: &Path) -> Result<()> {
 
 pub fn install_shortcuts(ctx: &Ctx, p: &Profile) -> Result<Vec<PathBuf>> {
     let settings = &ctx.config.settings;
-    let set = icons::write_for(&ctx.paths.icons_dir(), p)?;
+    let set = icons::write_for_ctx(ctx, p)?;
     let body = desktop_entry(p, &set.png);
     let mut made = Vec::new();
     for (dir, wanted) in [(applications_dir(), settings.app_shortcuts), (desktop_dir(), settings.desktop_shortcuts)] {
@@ -202,6 +212,28 @@ pub fn links_are_ours() -> Option<bool> {
 
 pub fn open_path(path: &Path) -> Result<()> {
     spawn_detached(Command::new("xdg-open").arg(path))
+}
+
+fn autostart_file() -> Option<PathBuf> {
+    directories::BaseDirs::new().map(|d| d.config_dir().join("autostart/claude-profile-hub-watcher.desktop"))
+}
+
+/// Starts the watcher at login (and now) through XDG autostart, or removes it.
+pub fn set_autostart(_ctx: &Ctx, on: bool) -> Result<()> {
+    let file = autostart_file().context("no config folder")?;
+    if !on {
+        remove_quietly(&file);
+        return Ok(());
+    }
+    std::fs::create_dir_all(file.parent().context("no parent")?)?;
+    std::fs::write(
+        &file,
+        format!(
+            "[Desktop Entry]\nType=Application\nName=Claude Profile Hub watcher\nExec={} watch\nNoDisplay=true\nX-GNOME-Autostart-enabled=true\n",
+            exec_quote(&gui_command().to_string_lossy())
+        ),
+    )?;
+    spawn_detached(Command::new(gui_command()).arg("watch"))
 }
 
 #[cfg(test)]

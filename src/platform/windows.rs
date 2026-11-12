@@ -52,6 +52,16 @@ pub fn focus(_pid: u32, _url: Option<&str>) -> Result<bool> {
     Ok(false)
 }
 
+/// Layered icons are a macOS 26 feature.
+pub fn compile_layered_icon(_fill: [u8; 3], _foreground_png: &[u8], _out: &Path) -> bool {
+    false
+}
+
+/// Claude's icon file is read directly here; there's nothing to export.
+pub fn export_app_icon(_app: &Path, _png: &Path) -> bool {
+    false
+}
+
 pub fn own_app_copy(_paths: &Paths, _p: &Profile, _install: &Install) -> Result<Option<Install>> {
     Ok(None)
 }
@@ -120,7 +130,7 @@ fn lnk_name(name: &str) -> String {
 
 pub fn install_shortcuts(ctx: &Ctx, p: &Profile) -> Result<Vec<PathBuf>> {
     let settings = &ctx.config.settings;
-    let set = icons::write_for(&ctx.paths.icons_dir(), p)?;
+    let set = icons::write_for_ctx(ctx, p)?;
     let target = gui_command();
     // Profile names can't contain quotes, so this is safe to quote as is.
     let args = format!("launch \"{}\"", p.name);
@@ -203,4 +213,20 @@ pub fn links_are_ours() -> Option<bool> {
 
 pub fn open_path(path: &Path) -> Result<()> {
     spawn_detached(Command::new("explorer.exe").arg(path))
+}
+
+const RUN_KEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Run";
+const RUN_VALUE: &str = "ClaudeProfileHubWatcher";
+
+/// Starts the watcher at sign-in (and now) through the Run key, or removes it.
+pub fn set_autostart(_ctx: &Ctx, on: bool) -> Result<()> {
+    let (key, _) = RegKey::predef(HKEY_CURRENT_USER).create_subkey(RUN_KEY)?;
+    if on {
+        let cmd = gui_command();
+        key.set_value(RUN_VALUE, &format!("\"{}\" watch", cmd.display()))?;
+        spawn_detached(Command::new(cmd).arg("watch"))?;
+    } else {
+        let _ = key.delete_value(RUN_VALUE);
+    }
+    Ok(())
 }

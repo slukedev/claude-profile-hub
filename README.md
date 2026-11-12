@@ -70,8 +70,19 @@ claude-profile-hub update
 - **Isolated profiles.** Each profile runs Claude Desktop with its own `--user-data-dir`, so
   sign-ins, chats, settings and connectors are separate. Profiles run at the same time.
 - **Shortcuts with their own icons.** Every profile gets a shortcut in your Applications folder,
-  Start menu or app launcher (and optionally the Desktop and the macOS Dock) with a colored icon
-  and a badge: one of 12 symbols, a letter, or nothing. 19 named colors or any hex color.
+  Start menu or app launcher (and optionally the Desktop and the macOS Dock). Its icon is
+  Claude's own icon recolored to the profile's color, with a small badge: one of 12 symbols, a
+  letter, or nothing. 19 named colors or any hex color. Claude's icon is read from the Claude
+  install on your computer; none of Anthropic's artwork ships with this project.
+- **macOS 26 icon styles.** With Xcode 26 installed, shortcut icons are built as layered icons,
+  so macOS draws real Dark, Clear and Tinted versions. Without Xcode, macOS applies its
+  automatic treatment.
+- **Every profile follows Claude updates.** Claude updates itself from whichever profile asks
+  first, leaving the others on the old version, and on macOS it reopens Claude's own profile
+  instead of the one you updated from. Claude Profile Hub notices the new version, quits the
+  profiles still on the old one, reopens them, and puts you back in the profile you updated
+  from. It checks whenever you open a profile; turn on the background watcher
+  (`claude-profile-hub config watcher on`, or in Settings) to have it happen within seconds.
 - **Bring back, don't duplicate.** Opening a profile that's already running brings its window
   forward, even after you closed the window, instead of starting a second copy.
 - **Sign-in links that land in the right place.** Claude grabs `claude://` links every time it
@@ -119,6 +130,8 @@ link_routing = "ask"          # ask | last-used | default
 app_shortcuts = true
 desktop_shortcuts = false
 dock_pins = false             # macOS
+follow_claude_updates = true  # reopen profiles on the new Claude after it updates
+background_watcher = false    # watch for updates from login (a tiny background process)
 accent = "orange"
 sort = "manual"               # manual | name | recent
 global_args = []

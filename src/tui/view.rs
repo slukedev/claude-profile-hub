@@ -369,6 +369,20 @@ fn setting_row(app: &App, s: Setting) -> (&'static str, String, &'static str) {
             if c.global_args.is_empty() { "none".into() } else { c.global_args.join(" ") },
             "Command-line flags passed to Claude for every profile, such as --disable-gpu.",
         ),
+        Setting::FollowUpdates => (
+            "Follow Claude updates",
+            on(c.follow_claude_updates).into(),
+            "When Claude updates from one profile, quit the others and reopen them on the new version, and put the profile you updated from back.",
+        ),
+        Setting::Watcher => (
+            "Watch in the background",
+            if c.background_watcher {
+                if crate::follow::watcher_running(&app.ctx) { "On (running)".into() } else { "On (not running)".into() }
+            } else {
+                "Off".into()
+            },
+            "A tiny helper that starts at login and notices Claude updates within seconds. Off, updates are followed the next time you open a profile.",
+        ),
         Setting::CheckUpdates => {
             ("Check for updates", on(c.check_updates).into(), "Look for a new release on GitHub once a day.")
         }

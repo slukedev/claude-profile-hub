@@ -9,8 +9,13 @@ First release, for macOS, Windows and Linux.
 - Command line for everything: `add`, `launch`, `list --json`, `edit`, `rename`, `stop`,
   `fresh`, `remove`, `shortcuts`, `links`, `config`, `doctor`, `update`, `export`,
   `import`, `completions`
-- Shortcuts with generated icons (12 symbols, letters, 19 colors or any hex) for the macOS
-  Applications folder and Dock, the Windows Start menu, Linux app launchers, and the Desktop
+- Shortcuts for the macOS Applications folder and Dock, the Windows Start menu, Linux app
+  launchers, and the Desktop, each with Claude's icon recolored per profile and a badge (12
+  symbols, letters, 19 colors or any hex)
+- Layered macOS 26 icons with Dark, Clear and Tinted styles when Xcode 26 is installed
+- When Claude updates from one profile, the others are quit and reopened on the new version,
+  and the profile that updated is put back in place of the default one the updater reopens;
+  optional background watcher to do this within seconds
 - Opening a running profile brings its window back instead of starting another copy
 - Sign-in link routing for `claude://` on all three platforms
 - Optional own Dock icon per profile on macOS (APFS clone of Claude.app)

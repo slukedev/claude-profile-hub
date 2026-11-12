@@ -58,10 +58,18 @@ fn same_file(a: &Path, b: &Path) -> bool {
     }
 }
 
+/// One running profile's main process.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Proc {
+    pub pid: u32,
+    /// Unix seconds.
+    pub started: i64,
+}
+
 /// A snapshot of running Claude profiles.
 #[derive(Debug, Default, Clone)]
 pub struct Running {
-    pids: HashMap<Owner, u32>,
+    procs: HashMap<Owner, Proc>,
 }
 
 impl Running {
@@ -72,30 +80,52 @@ impl Running {
             true,
             ProcessRefreshKind::nothing().with_cmd(UpdateKind::Always).with_exe(UpdateKind::Always),
         );
-        let mut pids = HashMap::new();
+        let mut procs: HashMap<Owner, Proc> = HashMap::new();
         for (pid, proc_) in sys.processes() {
             let cmd: Vec<String> = proc_.cmd().iter().map(|s| s.to_string_lossy().into_owned()).collect();
             if let Some(owner) = classify(proc_.exe(), &cmd, claude_exe) {
-                // Keep the oldest (lowest) PID if a profile somehow runs twice.
-                pids.entry(owner).and_modify(|p: &mut u32| *p = (*p).min(pid.as_u32())).or_insert(pid.as_u32());
+                let p = Proc { pid: pid.as_u32(), started: i64::try_from(proc_.start_time()).unwrap_or(0) };
+                // Keep the oldest if a profile somehow runs twice.
+                procs
+                    .entry(owner)
+                    .and_modify(|q| {
+                        if p.started < q.started {
+                            *q = p
+                        }
+                    })
+                    .or_insert(p);
             }
         }
-        Self { pids }
+        Self { procs }
+    }
+
+    #[cfg(test)]
+    pub fn from_procs(procs: impl IntoIterator<Item = (Owner, Proc)>) -> Self {
+        Self { procs: procs.into_iter().collect() }
+    }
+
+    pub fn get(&self, owner: &Owner) -> Option<Proc> {
+        self.procs.get(owner).copied()
     }
 
     pub fn pid(&self, owner: &Owner) -> Option<u32> {
-        self.pids.get(owner).copied()
+        self.get(owner).map(|p| p.pid)
+    }
+
+    pub fn owner_for_dir(dir: Option<&Path>) -> Owner {
+        dir.map_or(Owner::Default, |d| Owner::Dir(dir_key(d)))
     }
 
     pub fn pid_for_dir(&self, dir: Option<&Path>) -> Option<u32> {
-        match dir {
-            Some(d) => self.pid(&Owner::Dir(dir_key(d))),
-            None => self.pid(&Owner::Default),
-        }
+        self.pid(&Self::owner_for_dir(dir))
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = (&Owner, &Proc)> {
+        self.procs.iter()
     }
 
     pub fn count(&self) -> usize {
-        self.pids.len()
+        self.procs.len()
     }
 }
 

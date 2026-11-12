@@ -143,6 +143,9 @@ pub enum Cmd {
     Import { file: PathBuf },
     /// Print shell completions
     Completions { shell: clap_complete::Shell },
+    /// Watch for Claude updates and keep every profile on the new version (the background
+    /// watcher runs this; turn it on with `config watcher on`)
+    Watch,
     /// Hand a claude:// link to the right profile (used by the link handler)
     #[command(hide = true)]
     Route { url: String },
@@ -311,6 +314,9 @@ pub fn run(cli: Cli) -> Result<()> {
             clap_complete::generate(shell, &mut Cli::command(), BIN, &mut std::io::stdout());
         }
         Cmd::Route { url } => launch::route(&mut ctx, &url)?,
+        // Started by hand with the setting off, it runs until stopped; the login item
+        // stops when the setting is turned off.
+        Cmd::Watch => crate::follow::run_watcher(!ctx.config.settings.background_watcher)?,
     }
     Ok(())
 }
@@ -508,6 +514,8 @@ const CONFIG_KEYS: &[(&str, &str)] = &[
     ("sort", "manual | name | recent"),
     ("confirm-quit", "on | off"),
     ("global-args", "flags for every profile, space separated, or \"none\""),
+    ("follow-updates", "on | off: reopen profiles on the new Claude after it updates"),
+    ("watcher", "on | off: watch for Claude updates in the background, from login"),
 ];
 
 fn on_off(v: &str) -> Result<bool> {
@@ -533,6 +541,8 @@ fn config(ctx: &mut Ctx, key: Option<String>, value: Option<String>) -> Result<(
             "sort" => format!("{:?}", s.sort).to_lowercase(),
             "confirm-quit" => s.confirm_quit.to_string(),
             "global-args" => s.global_args.join(" "),
+            "follow-updates" => s.follow_claude_updates.to_string(),
+            "watcher" => s.background_watcher.to_string(),
             _ => return None,
         })
     };
@@ -611,6 +621,13 @@ fn config(ctx: &mut Ctx, key: Option<String>, value: Option<String>) -> Result<(
             }
         }
         "confirm-quit" => s.confirm_quit = on_off(&value)?,
+        "follow-updates" => s.follow_claude_updates = on_off(&value)?,
+        "watcher" => {
+            let on = on_off(&value)?;
+            ops::set_watcher(ctx, on)?;
+            println!("watcher = {}", if on { "on (starts at login)" } else { "off" });
+            return Ok(());
+        }
         "global-args" => {
             s.global_args =
                 if value == "none" { Vec::new() } else { value.split_whitespace().map(str::to_owned).collect() }

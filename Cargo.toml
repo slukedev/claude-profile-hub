@@ -62,6 +62,10 @@ ureq = { version = "3", default-features = false, features = ["rustls"] }
 [dev-dependencies]
 tempfile = "3"
 
+# Icon recoloring touches every pixel; unoptimized it makes tests and debug runs crawl.
+[profile.dev]
+opt-level = 1
+
 [profile.release]
 opt-level = 3
 lto = true

@@ -134,6 +134,8 @@ pub enum Setting {
     Accent,
     ConfirmQuit,
     GlobalArgs,
+    FollowUpdates,
+    Watcher,
     CheckUpdates,
     ConfigFile,
 }
@@ -151,7 +153,16 @@ impl Setting {
         if cfg!(target_os = "macos") {
             v.push(Self::DockPins);
         }
-        v.extend([Self::Sort, Self::Accent, Self::ConfirmQuit, Self::GlobalArgs, Self::CheckUpdates, Self::ConfigFile]);
+        v.extend([
+            Self::Sort,
+            Self::Accent,
+            Self::ConfirmQuit,
+            Self::GlobalArgs,
+            Self::FollowUpdates,
+            Self::Watcher,
+            Self::CheckUpdates,
+            Self::ConfigFile,
+        ]);
         v
     }
 }
@@ -618,6 +629,15 @@ impl App {
                     &cur,
                     InputFor::GlobalArgs,
                 );
+                return;
+            }
+            Setting::FollowUpdates => settings.follow_claude_updates = !settings.follow_claude_updates,
+            Setting::Watcher => {
+                let on = !settings.background_watcher;
+                let r = ops::set_watcher(&mut self.ctx, on);
+                self.report(r, |()| {
+                    if on { "The watcher is running and starts at login.".into() } else { "The watcher is off.".into() }
+                });
                 return;
             }
             Setting::CheckUpdates => settings.check_updates = !settings.check_updates,
