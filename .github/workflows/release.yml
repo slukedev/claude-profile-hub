@@ -1,0 +1,148 @@
+name: Release
+
+# Push a tag like v0.2.0 (matching Cargo.toml's version) to build every platform,
+# publish a GitHub release, and update Homebrew and winget.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  BIN: claude-profile-hub
+
+jobs:
+  check-version:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Tag matches Cargo.toml
+        run: |
+          version=$(sed -n 's/^version = "\(.*\)"$/\1/p' Cargo.toml | head -1)
+          if [ "v$version" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME doesn't match Cargo.toml version $version"
+            exit 1
+          fi
+
+  build:
+    needs: check-version
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { target: aarch64-apple-darwin, os: macos-latest }
+          - { target: x86_64-apple-darwin, os: macos-latest }
+          - { target: x86_64-unknown-linux-musl, os: ubuntu-latest, musl: true }
+          - { target: aarch64-unknown-linux-musl, os: ubuntu-24.04-arm, musl: true }
+          - { target: x86_64-pc-windows-msvc, os: windows-latest, windows: true }
+          - { target: aarch64-pc-windows-msvc, os: windows-11-arm, windows: true }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - if: matrix.musl
+        run: sudo apt-get update && sudo apt-get install -y musl-tools
+      - name: Build
+        shell: bash
+        run: |
+          features=""
+          if [ "${{ matrix.windows }}" = "true" ]; then features="--features gui-twin"; fi
+          cargo build --release --locked --target ${{ matrix.target }} $features
+      - name: Package
+        shell: bash
+        run: |
+          mkdir -p dist
+          out=target/${{ matrix.target }}/release
+          if [ "${{ matrix.windows }}" = "true" ]; then
+            cp "$out/$BIN.exe" "dist/$BIN-${{ matrix.target }}.exe"
+            cp "$out/$BIN-w.exe" "dist/$BIN-w-${{ matrix.target }}.exe"
+            (cd "$out" && 7z a "$GITHUB_WORKSPACE/dist/$BIN-${{ matrix.target }}.zip" "$BIN.exe" "$BIN-w.exe")
+          else
+            cp "$out/$BIN" "dist/$BIN-${{ matrix.target }}"
+            tar -C "$out" -czf "dist/$BIN-${{ matrix.target }}.tar.gz" "$BIN"
+          fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-${{ matrix.target }}
+          path: dist/*
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: dist-*
+          path: dist
+          merge-multiple: true
+      - name: Checksums
+        working-directory: dist
+        run: sha256sum * > SHA256SUMS && cat SHA256SUMS
+      - id: v
+        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          notes=$(awk -v v="${GITHUB_REF_NAME#v}" '$0 ~ "^## " v {on=1; next} /^## / {on=0} on' CHANGELOG.md)
+          gh release create "$GITHUB_REF_NAME" dist/* --verify-tag --title "$GITHUB_REF_NAME" --notes "${notes:-See CHANGELOG.md}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: checksums
+          path: dist/SHA256SUMS
+
+  homebrew:
+    needs: release
+    runs-on: ubuntu-latest
+    # Needs a token that can push to slukedev/homebrew-tap.
+    if: ${{ vars.HOMEBREW_TAP != 'off' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: checksums
+      - name: Render the formula
+        run: scripts/render-formula.sh "${{ needs.release.outputs.version }}" SHA256SUMS > claude-profile-hub.rb && cat claude-profile-hub.rb
+      - name: Push to the tap
+        env:
+          TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        run: |
+          if [ -z "$TOKEN" ]; then echo "::warning::HOMEBREW_TAP_TOKEN isn't set; skipping the tap update"; exit 0; fi
+          git clone "https://x-access-token:$TOKEN@github.com/slukedev/homebrew-tap.git" tap
+          mkdir -p tap/Formula
+          cp claude-profile-hub.rb tap/Formula/
+          cd tap
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Formula/claude-profile-hub.rb
+          git commit -m "claude-profile-hub ${{ needs.release.outputs.version }}" || exit 0
+          git push
+
+  winget:
+    needs: release
+    runs-on: windows-latest
+    steps:
+      - name: Submit to winget-pkgs
+        env:
+          TOKEN: ${{ secrets.WINGET_TOKEN }}
+        shell: bash
+        run: |
+          if [ -z "$TOKEN" ]; then echo "::warning::WINGET_TOKEN isn't set; skipping winget"; exit 0; fi
+          echo "has_token=true" >> "$GITHUB_ENV"
+      # The first version has to be submitted by hand (see packaging/winget/README.md);
+      # after that this opens the update PR automatically.
+      - if: env.has_token == 'true'
+        uses: vedantmgoyal9/winget-releaser@v2
+        with:
+          identifier: slukedev.ClaudeProfileHub
+          installers-regex: '\.zip$'
+          token: ${{ secrets.WINGET_TOKEN }}

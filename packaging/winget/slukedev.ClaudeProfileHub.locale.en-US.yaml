@@ -1,0 +1,22 @@
+# yaml-language-server: $schema=https://aka.ms/winget-manifest.defaultLocale.1.9.0.schema.json
+PackageIdentifier: slukedev.ClaudeProfileHub
+PackageVersion: 0.1.0
+PackageLocale: en-US
+Publisher: slukedev
+PublisherUrl: https://github.com/slukedev
+PackageName: Claude Profile Hub
+PackageUrl: https://github.com/slukedev/claude-profile-hub
+License: MIT
+LicenseUrl: https://github.com/slukedev/claude-profile-hub/blob/main/LICENSE
+ShortDescription: Run separate Claude Desktop profiles side by side, each with its own sign-in, chats and connectors.
+Description: |-
+  A command-line tool and terminal UI for running several Claude Desktop accounts at once (for
+  example work and personal), with a shortcut and icon per profile, sign-in link routing and
+  self-updates. Third-party; not affiliated with Anthropic.
+Tags:
+  - claude
+  - profiles
+  - tui
+  - cli
+ManifestType: defaultLocale
+ManifestVersion: 1.9.0

@@ -1,0 +1,80 @@
+[package]
+name = "claude-profile-hub"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+description = "Run separate Claude Desktop profiles side by side, each with its own login, chats and connectors"
+license = "MIT"
+repository = "https://github.com/slukedev/claude-profile-hub"
+readme = "README.md"
+keywords = ["claude", "profiles", "tui", "launcher"]
+categories = ["command-line-utilities"]
+
+[lib]
+name = "profilehub"
+path = "src/lib.rs"
+
+[[bin]]
+name = "claude-profile-hub"
+path = "src/main.rs"
+
+[[bin]]
+name = "claude-profile-hub-w"
+path = "src/bin/gui_twin.rs"
+required-features = ["gui-twin"]
+
+[features]
+# Builds claude-profile-hub-w, the windowless twin used by Windows shortcuts.
+gui-twin = []
+
+[dependencies]
+anyhow = "1"
+thiserror = "2"
+clap = { version = "4.6", features = ["derive", "wrap_help"] }
+clap_complete = "4.6"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "1"
+directories = "6"
+ratatui = "0.30"
+crossterm = "0.29"
+sysinfo = { version = "0.40", default-features = false, features = ["system"] }
+ureq = { version = "3", default-features = false, features = ["json", "gzip"] }
+sha2 = "0.10"
+self-replace = "1.5"
+tiny-skia = { version = "0.12", default-features = false, features = ["std", "simd", "png-format"] }
+ab_glyph = "0.2"
+trash = "5"
+time = { version = "0.3", features = ["local-offset", "formatting", "macros"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+plist = "1"
+# The system TLS stack: no C toolchain needed, and it trusts the keychain's certificates.
+ureq = { version = "3", default-features = false, features = ["native-tls"] }
+
+[target.'cfg(windows)'.dependencies]
+winreg = "0.56"
+ureq = { version = "3", default-features = false, features = ["native-tls"] }
+
+[target.'cfg(not(any(windows, target_os = "macos")))'.dependencies]
+ureq = { version = "3", default-features = false, features = ["rustls"] }
+
+[dev-dependencies]
+tempfile = "3"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+strip = true
+panic = "abort"
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[lints.clippy]
+all = { level = "warn", priority = -1 }
+unwrap_used = "warn"
+redundant_clone = "warn"
+needless_collect = "warn"
+large_enum_variant = "warn"

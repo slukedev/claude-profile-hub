@@ -1,0 +1,49 @@
+class ClaudeProfileHub < Formula
+  desc "Run separate Claude Desktop profiles side by side, each with its own sign-in"
+  homepage "https://github.com/slukedev/claude-profile-hub"
+  version "@VERSION@"
+  license "MIT"
+
+  base = "https://github.com/slukedev/claude-profile-hub/releases/download/v@VERSION@/claude-profile-hub"
+
+  on_macos do
+    on_arm do
+      url "#{base}-aarch64-apple-darwin.tar.gz"
+      sha256 "@SHA_MAC_ARM@"
+    end
+    on_intel do
+      url "#{base}-x86_64-apple-darwin.tar.gz"
+      sha256 "@SHA_MAC_INTEL@"
+    end
+  end
+
+  on_linux do
+    on_arm do
+      url "#{base}-aarch64-unknown-linux-musl.tar.gz"
+      sha256 "@SHA_LINUX_ARM@"
+    end
+    on_intel do
+      url "#{base}-x86_64-unknown-linux-musl.tar.gz"
+      sha256 "@SHA_LINUX_INTEL@"
+    end
+  end
+
+  def install
+    bin.install "claude-profile-hub"
+    generate_completions_from_executable(bin/"claude-profile-hub", "completions")
+  end
+
+  def caveats
+    <<~EOS
+      Run `claude-profile-hub` to set up your profiles.
+    EOS
+  end
+
+  test do
+    assert_match version.to_s, shell_output("#{bin}/claude-profile-hub --version")
+    ENV["CLAUDE_PROFILE_HUB_HOME"] = testpath
+    system bin/"claude-profile-hub", "config", "app-shortcuts", "off"
+    system bin/"claude-profile-hub", "add", "Work"
+    assert_match "Work", shell_output("#{bin}/claude-profile-hub list")
+  end
+end

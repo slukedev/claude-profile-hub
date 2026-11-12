@@ -1,0 +1,60 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  CLAUDE_PROFILE_HUB_NO_UPDATE_CHECK: "1"
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --check
+      - run: cargo clippy --all-targets --locked -- -D warnings
+
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: Clippy for this platform
+        run: cargo clippy --all-targets --all-features --locked -- -D warnings
+      - run: cargo test --all-features --locked
+      - name: Smoke test the CLI
+        shell: bash
+        run: |
+          export CLAUDE_PROFILE_HUB_HOME="$RUNNER_TEMP/cph"
+          bin=target/debug/claude-profile-hub
+          $bin --version
+          $bin config app-shortcuts off
+          $bin add Work --color teal
+          $bin add "Big Client" --badge B
+          $bin rename "Big Client" Acme
+          $bin list --json
+          $bin export
+          $bin doctor
+          $bin remove Acme --yes
+          $bin completions zsh > /dev/null

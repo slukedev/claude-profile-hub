@@ -1,0 +1,19 @@
+# yaml-language-server: $schema=https://aka.ms/winget-manifest.installer.1.9.0.schema.json
+PackageIdentifier: slukedev.ClaudeProfileHub
+PackageVersion: 0.1.0
+InstallerType: zip
+NestedInstallerType: portable
+NestedInstallerFiles:
+  - RelativeFilePath: claude-profile-hub.exe
+    PortableCommandAlias: claude-profile-hub
+  - RelativeFilePath: claude-profile-hub-w.exe
+    PortableCommandAlias: claude-profile-hub-w
+Installers:
+  - Architecture: x64
+    InstallerUrl: https://github.com/slukedev/claude-profile-hub/releases/download/v0.1.0/claude-profile-hub-x86_64-pc-windows-msvc.zip
+    InstallerSha256: REPLACE_WITH_SHA256_FROM_SHA256SUMS
+  - Architecture: arm64
+    InstallerUrl: https://github.com/slukedev/claude-profile-hub/releases/download/v0.1.0/claude-profile-hub-aarch64-pc-windows-msvc.zip
+    InstallerSha256: REPLACE_WITH_SHA256_FROM_SHA256SUMS
+ManifestType: installer
+ManifestVersion: 1.9.0
