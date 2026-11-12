@@ -17,7 +17,7 @@ jobs:
   check-version:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Tag matches Cargo.toml
         run: |
           version=$(sed -n 's/^version = "\(.*\)"$/\1/p' Cargo.toml | head -1)
@@ -40,7 +40,7 @@ jobs:
           - { target: aarch64-pc-windows-msvc, os: windows-11-arm, windows: true }
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
@@ -78,7 +78,7 @@ jobs:
     outputs:
       version: ${{ steps.v.outputs.version }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: actions/download-artifact@v4
         with:
           pattern: dist-*
@@ -106,7 +106,7 @@ jobs:
     # Needs a token that can push to slukedev/homebrew-tap.
     if: ${{ vars.HOMEBREW_TAP != 'off' }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: actions/download-artifact@v4
         with:
           name: checksums

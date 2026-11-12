@@ -20,7 +20,7 @@ jobs:
   lint:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy, rustfmt
@@ -35,7 +35,7 @@ jobs:
         os: [ubuntu-latest, macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
@@ -43,6 +43,8 @@ jobs:
       - name: Clippy for this platform
         run: cargo clippy --all-targets --all-features --locked -- -D warnings
       - run: cargo test --all-features --locked
+      - name: Build the binary
+        run: cargo build --locked
       - name: Smoke test the CLI
         shell: bash
         run: |
