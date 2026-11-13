@@ -17,6 +17,15 @@ macOS and Linux:
 brew install slukedev/tap/claude-profile-hub
 ```
 
+Homebrew 6 and later only load formulae from taps you trust. If `brew` says the tap isn't
+trusted, trust just this formula and install again:
+
+```bash
+brew trust --formula slukedev/tap/claude-profile-hub
+```
+
+To update later: `brew update && brew upgrade claude-profile-hub`.
+
 Windows:
 
 ```powershell
