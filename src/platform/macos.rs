@@ -96,7 +96,7 @@ function run(argv) {
 /// Compiles an Icon Composer icon (a fill and one foreground layer) into an Assets.car with
 /// actool, which ships with Xcode 26. macOS 26 draws the Default, Dark, Clear and Tinted
 /// styles from its layers. Returns false when actool isn't there or fails.
-pub fn compile_layered_icon(fill: [u8; 3], foreground_png: &[u8], out: &Path) -> bool {
+pub fn compile_layered_icon(layers: &icons::Layered, out: &Path) -> bool {
     let have_actool = Command::new("xcrun")
         .args(["--find", "actool"])
         .stdout(Stdio::null())
@@ -111,19 +111,10 @@ pub fn compile_layered_icon(fill: [u8; 3], foreground_png: &[u8], out: &Path) ->
         let bundle = work.join("AppIcon.icon");
         std::fs::create_dir_all(bundle.join("Assets"))?;
         std::fs::create_dir_all(work.join("compiled"))?;
-        std::fs::write(bundle.join("Assets/foreground.png"), foreground_png)?;
-        let c = |v: u8| f32::from(v) / 255.0;
-        let json = format!(
-            r#"{{
-  "fill" : {{ "solid" : "srgb:{:.5},{:.5},{:.5},1.00000" }},
-  "groups" : [ {{ "layers" : [ {{ "image-name" : "foreground.png", "name" : "foreground" }} ] }} ],
-  "supported-platforms" : {{ "squares" : "shared" }}
-}}"#,
-            c(fill[0]),
-            c(fill[1]),
-            c(fill[2])
-        );
-        std::fs::write(bundle.join("icon.json"), json)?;
+        for (name, png) in layers.assets()? {
+            std::fs::write(bundle.join("Assets").join(name), png)?;
+        }
+        std::fs::write(bundle.join("icon.json"), layers.icon_json())?;
         let ok = Command::new("xcrun")
             .arg("actool")
             .arg(&bundle)

@@ -75,8 +75,9 @@ claude-profile-hub update
   letter, or nothing. 19 named colors or any hex color. Claude's icon is read from the Claude
   install on your computer; none of Anthropic's artwork ships with this project.
 - **macOS 26 icon styles.** With Xcode 26 installed, shortcut icons are built as layered icons,
-  so macOS draws real Dark, Clear and Tinted versions. Without Xcode, macOS applies its
-  automatic treatment.
+  so macOS draws real Dark, Clear and Tinted versions. In Dark the icon goes dark but keeps the
+  profile's color: a dark background tinted with it, and Claude's mark in it. The badge is its
+  own layer. Without Xcode, macOS applies its automatic treatment.
 - **Every profile follows Claude updates.** Claude updates itself from whichever profile asks
   first, leaving the others on the old version, and on macOS it reopens Claude's own profile
   instead of the one you updated from. Claude Profile Hub notices the new version, quits the

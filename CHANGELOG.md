@@ -12,7 +12,8 @@ First release, for macOS, Windows and Linux.
 - Shortcuts for the macOS Applications folder and Dock, the Windows Start menu, Linux app
   launchers, and the Desktop, each with Claude's icon recolored per profile and a badge (12
   symbols, letters, 19 colors or any hex)
-- Layered macOS 26 icons with Dark, Clear and Tinted styles when Xcode 26 is installed
+- Layered macOS 26 icons with Dark, Clear and Tinted styles when Xcode 26 is installed; Dark
+  keeps each profile's color (tinted dark background, mark in the profile color)
 - When Claude updates from one profile, the others are quit and reopened on the new version,
   and the profile that updated is put back in place of the default one the updater reopens;
   optional background watcher to do this within seconds

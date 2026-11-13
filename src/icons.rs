@@ -495,6 +495,98 @@ fn draw_badge(pm: &mut Pixmap, badge: &Badge, rgb: [u8; 3], bounds: Rect) {
     }
 }
 
+/// Dark background: near black, tinted with the profile's color.
+fn dark_fill(rgb: [u8; 3]) -> [u8; 3] {
+    let base = [20.0f32, 20.0, 23.0];
+    std::array::from_fn(|i| (base[i] * 0.82 + f32::from(rgb[i]) * 0.18).round() as u8)
+}
+
+/// The profile's color for a mark on a dark background: bright enough to stand out,
+/// saturated enough to tell profiles apart.
+fn dark_mark_color(rgb: [u8; 3]) -> (f32, f32, f32) {
+    let (r, g, b) = unit(rgb);
+    let mut c = to_hsv(r, g, b);
+    c.v = c.v.max(0.88);
+    if c.s > 0.15 {
+        c.s = c.s.clamp(0.45, 0.85);
+    }
+    // Blues and purples look darker than greens at the same value; lift them toward white
+    // until they're about as bright, so every profile's mark reads on the dark background.
+    let (r, g, b) = to_rgb(c);
+    let luma = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+    const MIN_LUMA: f32 = 0.55;
+    if luma >= MIN_LUMA {
+        return (r, g, b);
+    }
+    let t = (MIN_LUMA - luma) / (1.0 - luma);
+    (r + (1.0 - r) * t, g + (1.0 - g) * t, b + (1.0 - b) * t)
+}
+
+/// A layered icon: what [`Layered::icon_json`] describes, as images.
+pub struct Layered {
+    /// Background in Default (and the base other styles start from).
+    pub fill: [u8; 3],
+    /// Background in Dark.
+    pub dark_fill: [u8; 3],
+    /// Claude's mark as in Claude's own icon, on a transparent full canvas.
+    pub mark: Pixmap,
+    /// The mark in the profile's color, for Dark.
+    pub mark_dark: Pixmap,
+    /// The badge on its own layer, if the profile has one.
+    pub badge: Option<Pixmap>,
+}
+
+impl Layered {
+    /// Asset file names used by [`Layered::icon_json`].
+    pub const MARK: &'static str = "mark.png";
+    pub const MARK_DARK: &'static str = "mark-dark.png";
+    pub const BADGE: &'static str = "badge.png";
+
+    /// The Icon Composer document (`icon.json`). Groups are listed front to back, so the
+    /// badge sits above the mark and gets its own glass.
+    pub fn icon_json(&self) -> String {
+        let color = |c: [u8; 3]| {
+            format!(
+                "srgb:{:.5},{:.5},{:.5},1.00000",
+                f32::from(c[0]) / 255.0,
+                f32::from(c[1]) / 255.0,
+                f32::from(c[2]) / 255.0
+            )
+        };
+        let mut groups = Vec::new();
+        if self.badge.is_some() {
+            groups.push(serde_json::json!({ "layers": [ { "name": "badge", "image-name": Self::BADGE } ] }));
+        }
+        groups.push(serde_json::json!({
+            "layers": [ {
+                "name": "mark",
+                "image-name-specializations": [
+                    { "value": Self::MARK },
+                    { "appearance": "dark", "value": Self::MARK_DARK }
+                ]
+            } ]
+        }));
+        let doc = serde_json::json!({
+            "fill-specializations": [
+                { "value": { "solid": color(self.fill) } },
+                { "appearance": "dark", "value": { "solid": color(self.dark_fill) } }
+            ],
+            "groups": groups,
+            "supported-platforms": { "squares": "shared" }
+        });
+        serde_json::to_string_pretty(&doc).unwrap_or_default()
+    }
+
+    /// Each asset's file name and PNG bytes.
+    pub fn assets(&self) -> Result<Vec<(&'static str, Vec<u8>)>> {
+        let mut out = vec![(Self::MARK, self.mark.encode_png()?), (Self::MARK_DARK, self.mark_dark.encode_png()?)];
+        if let Some(b) = &self.badge {
+            out.push((Self::BADGE, b.encode_png()?));
+        }
+        Ok(out)
+    }
+}
+
 /// A profile's look, ready to draw at any size.
 pub struct Look {
     rgb: [u8; 3],
@@ -547,13 +639,13 @@ impl Look {
         Some(pm)
     }
 
-    /// The icon split into layers for macOS 26's Icon Composer format: a solid fill (the
-    /// recolored background of Claude's icon) and a full-canvas foreground with Claude's
-    /// mark and the badge. macOS draws the Default, Dark, Clear and Tinted styles from these.
-    pub fn layers(&self) -> Option<([u8; 3], Pixmap)> {
+    /// The icon split into layers for macOS 26's Icon Composer format. macOS draws the
+    /// Default, Dark, Clear and Tinted styles from these; Dark gets its own background and
+    /// mark so the profile's color stays visible on a dark icon.
+    pub fn layers(&self) -> Option<Layered> {
         let (master, bounds) = self.master.as_ref()?;
         let fill = sample_background(master, *bounds)?;
-        // Foreground: everything that differs from the background, cropped to the icon.
+        // The mark: everything that differs from the background, cropped to the icon.
         let mut cut = master.clone();
         for p in cut.pixels_mut() {
             let (r, g, b, a) = get(*p);
@@ -568,16 +660,40 @@ impl Look {
             let unblend = |c: f32, bg: f32| ((c - bg * (1.0 - w)) / w).clamp(0.0, 1.0);
             *p = set(unblend(r, fill.0), unblend(g, fill.1), unblend(b, fill.2), a * w);
         }
-        let mut fg = Pixmap::new(MASTER, MASTER)?;
+        let mut mark = Pixmap::new(MASTER, MASTER)?;
         let (sx, sy) = (MASTER as f32 / bounds.width(), MASTER as f32 / bounds.height());
         let paint = PixmapPaint { quality: FilterQuality::Bicubic, ..PixmapPaint::default() };
         let t = Transform::from_translate(-bounds.left(), -bounds.top()).post_scale(sx, sy);
-        fg.draw_pixmap(0, 0, cut.as_ref(), &paint, t, None);
-        // Keep the badge inside the rounded mask macOS applies to the whole canvas.
-        let d = MASTER as f32;
-        draw_badge(&mut fg, &self.badge, self.rgb, Rect::from_ltrb(d * 0.1, d * 0.1, d * 0.9, d * 0.9)?);
+        mark.draw_pixmap(0, 0, cut.as_ref(), &paint, t, None);
+
+        // Dark: the mark in the profile's color, keeping the mark's own shading.
+        let ink = dark_mark_color(self.rgb);
+        let mut mark_dark = mark.clone();
+        for p in mark_dark.pixels_mut() {
+            let (r, g, b, a) = get(*p);
+            if a > 0.0 {
+                let shade = 0.78 + 0.22 * ((r + g + b) / 3.0);
+                *p = set(ink.0 * shade, ink.1 * shade, ink.2 * shade, a);
+            }
+        }
+
+        // The badge on its own layer, kept inside the rounded mask macOS applies.
+        let badge = if self.badge == Badge::None {
+            None
+        } else {
+            let mut pm = Pixmap::new(MASTER, MASTER)?;
+            let d = MASTER as f32;
+            draw_badge(&mut pm, &self.badge, self.rgb, Rect::from_ltrb(d * 0.1, d * 0.1, d * 0.9, d * 0.9)?);
+            Some(pm)
+        };
         let byte = |v: f32| (v * 255.0).round().clamp(0.0, 255.0) as u8;
-        Some(([byte(fill.0), byte(fill.1), byte(fill.2)], fg))
+        Some(Layered {
+            fill: [byte(fill.0), byte(fill.1), byte(fill.2)],
+            dark_fill: dark_fill(self.rgb),
+            mark,
+            mark_dark,
+            badge,
+        })
     }
 
     fn png(&self, dim: u32) -> Result<Vec<u8>> {
@@ -813,12 +929,13 @@ pub fn write_for(dir: &Path, profile: &Profile, source: Option<&Source>) -> Resu
         icns: dir.join(format!("{stem}.icns")),
         car: None,
     };
-    let car = dir.join(format!("{stem}.car"));
+    // The layer layout is versioned so a change to it rebuilds cached layered icons.
+    let car = dir.join(format!("{stem}-layers2.car"));
     let need_png = !set.png.exists();
     let need_ico = cfg!(windows) && !set.ico.exists();
     let need_icns = cfg!(target_os = "macos") && !set.icns.exists();
     // A failed attempt (no Xcode) is remembered, so it isn't retried on every shortcut.
-    let car_failed = dir.join(format!("{stem}.nocar"));
+    let car_failed = dir.join(format!("{stem}-layers2.nocar"));
     let need_car = cfg!(target_os = "macos") && source.is_some() && !car.exists() && !car_failed.exists();
     if need_png || need_ico || need_icns || need_car {
         let look = Look::new(rgb, badge, source.map(|s| &s.pixmap));
@@ -832,9 +949,7 @@ pub fn write_for(dir: &Path, profile: &Profile, source: Option<&Source>) -> Resu
             std::fs::write(&set.icns, look.icns()?)?;
         }
         if need_car {
-            let built = look.layers().is_some_and(|(fill, fg)| {
-                fg.encode_png().is_ok_and(|png| crate::platform::compile_layered_icon(fill, &png, &car))
-            });
+            let built = look.layers().is_some_and(|l| crate::platform::compile_layered_icon(&l, &car));
             if !built {
                 let _ = std::fs::write(&car_failed, b"");
             }
@@ -942,10 +1057,32 @@ mod tests {
     #[test]
     fn layers_split_fill_from_mark() {
         let look = Look::new([31, 173, 189], Badge::None, Some(&fake_claude()));
-        let (fill, fg) = look.layers().expect("layers");
-        assert!(fill[2] > fill[0], "fill is the recolored background, got {fill:?}");
-        assert_eq!(fg.pixel(5, 5).expect("px").alpha(), 0, "background isn't in the foreground");
-        assert!(fg.pixel(512, 512).expect("px").alpha() > 200, "the mark is");
+        let l = look.layers().expect("layers");
+        assert!(l.fill[2] > l.fill[0], "fill is the recolored background, got {:?}", l.fill);
+        assert_eq!(l.mark.pixel(5, 5).expect("px").alpha(), 0, "background isn't in the mark layer");
+        assert!(l.mark.pixel(512, 512).expect("px").alpha() > 200, "the mark is");
+    }
+
+    #[test]
+    fn dark_layers_keep_the_profile_color() {
+        let l = Look::new([31, 173, 189], Badge::Symbol("star"), Some(&fake_claude())).layers().expect("layers");
+        let fill_sum: u32 = l.dark_fill.iter().map(|&c| u32::from(c)).sum();
+        assert!(fill_sum < 150, "dark background, got {:?}", l.dark_fill);
+        assert!(l.dark_fill[2] > l.dark_fill[0], "tinted teal, got {:?}", l.dark_fill);
+        let (r, g, b, _) = get(l.mark_dark.pixel(512, 512).expect("px"));
+        assert!(g > r + 0.2 && b > r + 0.2, "mark is teal in Dark, got {r} {g} {b}");
+    }
+
+    #[test]
+    fn icon_json_puts_badge_in_front_and_specializes_dark() {
+        let l = Look::new([97, 89, 199], Badge::Symbol("work"), Some(&fake_claude())).layers().expect("layers");
+        let doc: serde_json::Value = serde_json::from_str(&l.icon_json()).expect("json");
+        assert_eq!(doc["groups"][0]["layers"][0]["name"], "badge");
+        assert_eq!(doc["groups"][1]["layers"][0]["image-name-specializations"][1]["appearance"], "dark");
+        assert_eq!(doc["fill-specializations"][1]["appearance"], "dark");
+        let no_badge = Look::new([97, 89, 199], Badge::None, Some(&fake_claude())).layers().expect("layers");
+        let doc: serde_json::Value = serde_json::from_str(&no_badge.icon_json()).expect("json");
+        assert_eq!(doc["groups"].as_array().map(Vec::len), Some(1));
     }
 
     #[test]

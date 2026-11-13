@@ -33,7 +33,7 @@ pub fn focus(_pid: u32, _url: Option<&str>) -> Result<bool> {
 }
 
 /// Layered icons are a macOS 26 feature.
-pub fn compile_layered_icon(_fill: [u8; 3], _foreground_png: &[u8], _out: &Path) -> bool {
+pub fn compile_layered_icon(_layers: &crate::icons::Layered, _out: &Path) -> bool {
     false
 }
 
