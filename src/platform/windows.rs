@@ -72,6 +72,10 @@ pub fn adopt_updated_copy(_paths: &Paths, _install: &Install) -> Result<Option<i
     Ok(None)
 }
 
+pub fn updated_copy(_paths: &Paths, _install: &Install) -> Option<PathBuf> {
+    None
+}
+
 pub fn own_icon_env(_p: &Profile) -> Vec<(String, String)> {
     Vec::new()
 }
@@ -189,7 +193,7 @@ public static class CphTaskbar {
 }
 "#;
 
-/// Finds the profile's Claude process and keeps its windows on the profile's taskbar
+/// Waits for the profile's Claude process (it's started right after) and keeps its windows on the profile's taskbar
 /// identity and icon until it quits. One per profile, thanks to the mutex.
 const WATCH_PS: &str = r#"
 $m = New-Object System.Threading.Mutex($false, 'Local\ClaudeProfileHubIcon-' + $env:CPH_ID)
@@ -267,8 +271,11 @@ $s.WorkingDirectory = $env:CPH_WD
 $s.Save()
 # The same taskbar identity as the profile's windows, so the running Claude groups with
 # this shortcut (and a pinned copy of it) and shows its icon.
-Add-Type -TypeDefinition $env:CPH_CS
-[CphTaskbar]::SetShortcutId($env:CPH_LNK, $env:CPH_ID)
+# Best effort: the shortcut works without it (where PowerShell can't compile code).
+try {
+  Add-Type -TypeDefinition $env:CPH_CS
+  [CphTaskbar]::SetShortcutId($env:CPH_LNK, $env:CPH_ID)
+} catch {}
 "#;
 
 fn write_lnk(lnk: &Path, target: &Path, args: &str, icon: &Path, desc: &str, id: &str) -> Result<()> {
@@ -394,4 +401,26 @@ pub fn set_autostart(_ctx: &Ctx, on: bool) -> Result<()> {
         let _ = key.delete_value(RUN_VALUE);
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The taskbar interop is C# compiled at run time, so only Windows can check it.
+    #[test]
+    fn taskbar_interop_compiles() {
+        let out = powershell(
+            "Add-Type -TypeDefinition $env:CPH_CS; [void][CphTaskbar].GetMethod('Watch'); 'ok'",
+            &[("CPH_CS", TASKBAR_CS)],
+        );
+        assert_eq!(out.expect("Add-Type should compile the taskbar interop"), "ok");
+    }
+
+    #[test]
+    fn app_id_is_a_valid_taskbar_id() {
+        let id = app_id("Big Client");
+        assert_eq!(id, "ClaudeProfileHub.Profile.big-client");
+        assert!(id.len() <= 128 && !id.contains(' '));
+    }
 }

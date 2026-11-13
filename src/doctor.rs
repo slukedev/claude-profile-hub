@@ -32,6 +32,18 @@ pub fn run(ctx: &Ctx) -> Vec<Check> {
         format!("{} on {}", crate::update::current_exe().display(), std::env::consts::OS),
     ));
 
+    if let Some(copy) = ctx.claude().and_then(|c| platform::updated_copy(&ctx.paths, &c)) {
+        out.push(Check::new(
+            Level::Warn,
+            "Claude updated in one profile's copy only",
+            format!(
+                "{} is newer than Claude.app and couldn't replace it, so other profiles stay on the old version. Allow {} (or your terminal) under System Settings > Privacy & Security > App Management, or update Claude from its own profile.",
+                copy.display(),
+                crate::NAME
+            ),
+        ));
+    }
+
     match ctx.claude() {
         Some(c) => out.push(Check::new(
             Level::Ok,

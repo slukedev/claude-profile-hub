@@ -287,9 +287,15 @@ pub fn show_own_icon(_ctx: &Ctx, _p: &Profile, _install: &Install) -> Result<()>
 /// Claude.app and every other profile move to the new version too. Returns when the updater
 /// installed it, in Unix seconds, or None when no copy is newer.
 pub fn adopt_updated_copy(paths: &Paths, install: &Install) -> Result<Option<i64>> {
-    let Some(current) = install.version.as_deref().map(crate::claude::version_key) else { return Ok(None) };
+    let Some(copy) = updated_copy(paths, install) else { return Ok(None) };
+    adopt(&copy, install).map(Some)
+}
+
+/// A profile's copy of Claude that's newer than Claude.app: Claude updated itself there.
+pub fn updated_copy(paths: &Paths, install: &Install) -> Option<PathBuf> {
+    let current = install.version.as_deref().map(crate::claude::version_key)?;
     let mut newest: Option<(Vec<u32>, PathBuf)> = None;
-    let Ok(profiles) = std::fs::read_dir(copies_dir(paths)) else { return Ok(None) };
+    let profiles = std::fs::read_dir(copies_dir(paths)).ok()?;
     for app in profiles.flatten().filter_map(|d| std::fs::read_dir(d.path()).ok()).flatten().flatten() {
         let path = app.path();
         let hidden = path.file_name().is_some_and(|n| n.to_string_lossy().starts_with('.'));
@@ -303,8 +309,11 @@ pub fn adopt_updated_copy(paths: &Paths, install: &Install) -> Result<Option<i64
             newest = Some((v, path));
         }
     }
-    let Some((_, copy)) = newest else { return Ok(None) };
-    let updated_at = std::fs::metadata(&copy)
+    newest.map(|(_, path)| path)
+}
+
+fn adopt(copy: &Path, install: &Install) -> Result<i64> {
+    let updated_at = std::fs::metadata(copy)
         .and_then(|m| m.created())
         .ok()
         .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
@@ -316,7 +325,7 @@ pub fn adopt_updated_copy(paths: &Paths, install: &Install) -> Result<Option<i64
     let old = parent.join(".Claude Profile Hub previous.app");
     remove_quietly(&tmp);
     remove_quietly(&old);
-    if !Command::new("cp").arg("-cR").arg(&copy).arg(&tmp).status().is_ok_and(|s| s.success()) {
+    if !Command::new("cp").arg("-cR").arg(copy).arg(&tmp).status().is_ok_and(|s| s.success()) {
         remove_quietly(&tmp);
         bail!("couldn't copy {} next to {}", copy.display(), install.app.display());
     }
@@ -332,7 +341,7 @@ pub fn adopt_updated_copy(paths: &Paths, install: &Install) -> Result<Option<i64
     }
     remove_quietly(&old);
     let _ = Command::new(LSREGISTER).arg("-f").arg(&install.app).status();
-    Ok(Some(updated_at))
+    Ok(updated_at)
 }
 
 pub fn pick(prompt: &str, options: &[String], preselect: &str) -> Pick {

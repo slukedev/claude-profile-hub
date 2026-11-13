@@ -65,12 +65,13 @@ pub fn launch(ctx: &mut Ctx, name: &str, url: Option<&str>) -> Result<Outcome> {
             }
             // The profile's own variables win.
             env.extend(profile.as_ref().map(|p| p.env.clone()).unwrap_or_default());
-            platform::start(&install, &args, &env, url)?;
+            // Before starting, so the icon is ready when its first window appears.
             if let Some(p) = profile.as_ref().filter(|p| p.own_app) {
                 if let Err(e) = platform::show_own_icon(ctx, p, &install) {
                     eprintln!("note: couldn't give {} its own icon while it runs: {e:#}", p.name);
                 }
             }
+            platform::start(&install, &args, &env, url)?;
             if pid.is_some() { Outcome::Focused } else { Outcome::Started }
         }
     };

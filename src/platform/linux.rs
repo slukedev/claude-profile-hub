@@ -52,6 +52,10 @@ pub fn adopt_updated_copy(_paths: &Paths, _install: &Install) -> Result<Option<i
     Ok(None)
 }
 
+pub fn updated_copy(_paths: &Paths, _install: &Install) -> Option<PathBuf> {
+    None
+}
+
 /// Electron takes its Wayland app ID from `CHROME_DESKTOP` (the desktop entry's file name).
 /// Docks, task switchers and window lists find a window's desktop entry by that ID, and
 /// show that entry's icon, so pointing it at the profile's entry gives the running Claude
