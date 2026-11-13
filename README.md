@@ -105,6 +105,10 @@ claude-profile-hub update
     runs from its own copy of Claude.app (an APFS clone that takes almost no space and keeps
     Anthropic's signature) carrying the profile's icon. If Claude updates itself from a profile,
     the update lands in that copy, so it's copied over Claude.app and the other profiles follow.
+    The shortcut that starts it has no Dock icon of its own, so a profile shows up once. A pinned
+    shortcut (the Dock pins setting) still sits beside the running profile's icon, since macOS
+    can't open the copy with its profile on its own. For the same reason, don't use "Keep in
+    Dock" on the running icon: clicked later, it opens Claude without the profile.
   - Windows: each profile's windows get their own taskbar identity (AppUserModelID), shared with
     its Start menu shortcut, plus the profile's window icon. A small hidden helper keeps them
     that way until the profile quits.

@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.1
+
+- macOS: opening a profile no longer shows two icons in the Dock. The shortcut that starts
+  Claude no longer gets a Dock icon of its own, so only the running profile shows
+- Shortcuts are rebuilt once after an update, so fixes like this reach existing shortcuts
+
 ## 0.2.0
 
 - A running profile now shows its own icon in the Dock, taskbar or app switcher, not only

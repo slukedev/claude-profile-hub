@@ -182,6 +182,7 @@ pub fn run(cli: Cli) -> Result<()> {
     let mut ctx = Ctx::load()?;
     let Some(cmd) = cli.command else {
         if std::io::stdout().is_terminal() && std::io::stdin().is_terminal() {
+            ops::refresh_after_update(&mut ctx);
             return crate::tui::run(ctx);
         }
         return list(&ctx, false);
@@ -195,6 +196,9 @@ pub fn run(cli: Cli) -> Result<()> {
                 Outcome::Started => println!("Opened {name}."),
                 Outcome::Focused => println!("{name} was already open; brought it to the front."),
             }
+            // Shortcuts are how most people open profiles, so this is where an update's
+            // changes to them get applied. After the launch, so it doesn't slow it down.
+            ops::refresh_after_update(&mut ctx);
         }
         Cmd::List { json } => list(&ctx, json)?,
         Cmd::Add { name, color, badge, dir, launch: open } => {

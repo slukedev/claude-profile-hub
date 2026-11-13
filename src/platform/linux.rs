@@ -223,6 +223,11 @@ pub fn existing_shortcuts(name: &str) -> Vec<PathBuf> {
         .collect()
 }
 
+/// The handler is a plain registration here; claiming again rewrites it.
+pub fn rebuild_link_handler(ctx: &Ctx) -> Result<()> {
+    claim_links(ctx)
+}
+
 pub fn claim_links(_ctx: &Ctx) -> Result<()> {
     let dir = applications_dir().context("no data folder")?;
     std::fs::create_dir_all(&dir)?;

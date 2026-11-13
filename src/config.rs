@@ -276,6 +276,9 @@ pub struct State {
     pub links_claimed: bool,
     /// The Claude Desktop version seen last, to notice when it updates.
     pub claude_version: Option<String>,
+    /// The version of Claude Profile Hub that last built the shortcuts, so an update can
+    /// rebuild them when how they're made has changed.
+    pub shortcuts_version: Option<String>,
 }
 
 impl State {

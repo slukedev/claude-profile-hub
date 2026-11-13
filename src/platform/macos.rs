@@ -406,6 +406,10 @@ fn finalize_applet(
     let dict = value.as_dictionary_mut().context("Info.plist isn't a dictionary")?;
     dict.insert("CFBundleIdentifier".into(), bundle_id.into());
     dict.insert("CFBundleIconFile".into(), "applet".into());
+    // The applet only hands off to Claude (which shows in the Dock with the profile's icon
+    // while it runs), so it gets no Dock tile of its own. Otherwise opening a profile shows
+    // two icons until the applet quits.
+    dict.insert("LSUIElement".into(), true.into());
     // CFBundleIconName names the layered icon in Assets.car (macOS 26's Dark, Clear and
     // Tinted styles); applet.icns stays for older macOS. Without a car, drop the name so
     // osacompile's own Assets.car doesn't override our icon.
@@ -448,7 +452,7 @@ pub fn install_shortcuts(ctx: &Ctx, p: &Profile) -> Result<Vec<PathBuf>> {
         std::fs::create_dir_all(app.parent().context("no parent")?)?;
         let cmd = gui_command();
         let source = format!(
-            "on run\n\ttry\n\t\tdo shell script quoted form of {} & \" launch \" & quoted form of {}\n\ton error errText\n\t\tdisplay alert {} message errText as warning\n\tend try\nend run\n",
+            "on run\n\ttry\n\t\tdo shell script quoted form of {} & \" launch \" & quoted form of {}\n\ton error errText\n\t\tactivate\n\t\tdisplay alert {} message errText as warning\n\tend try\nend run\n",
             as_string(&cmd.to_string_lossy()),
             as_string(&p.name),
             as_string(&format!("Couldn't open {}", shortcut_title(&p.name))),
@@ -502,7 +506,7 @@ fn build_router(ctx: &Ctx) -> Result<PathBuf> {
     std::fs::create_dir_all(app.parent().context("no parent")?)?;
     let cmd = gui_command();
     let source = format!(
-        "on run\n\tdo shell script quoted form of {cmd} & \" pick\"\nend run\n\non open location theURL\n\ttry\n\t\tdo shell script quoted form of {cmd} & \" route \" & quoted form of theURL\n\ton error errText\n\t\tdisplay alert \"Couldn't open the link\" message errText as warning\n\tend try\nend open location\n",
+        "on run\n\tdo shell script quoted form of {cmd} & \" pick\"\nend run\n\non open location theURL\n\ttry\n\t\tdo shell script quoted form of {cmd} & \" route \" & quoted form of theURL\n\ton error errText\n\t\tactivate\n\t\tdisplay alert \"Couldn't open the link\" message errText as warning\n\tend try\nend open location\n",
         cmd = as_string(&cmd.to_string_lossy()),
     );
     compile_applet(&app, &source)?;
@@ -532,6 +536,13 @@ fn build_router(ctx: &Ctx) -> Result<PathBuf> {
         dict.insert("LSUIElement".into(), true.into());
     })?;
     Ok(app)
+}
+
+/// Rebuilds the link handler applet (after an update changed how it's made) and claims
+/// links for it again.
+pub fn rebuild_link_handler(ctx: &Ctx) -> Result<()> {
+    build_router(ctx)?;
+    claim_links(ctx)
 }
 
 pub fn claim_links(ctx: &Ctx) -> Result<()> {

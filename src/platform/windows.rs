@@ -360,6 +360,11 @@ fn set_handler(command: &str, icon: Option<&Path>) -> Result<()> {
     Ok(())
 }
 
+/// The handler is a plain registration here; claiming again rewrites it.
+pub fn rebuild_link_handler(ctx: &Ctx) -> Result<()> {
+    claim_links(ctx)
+}
+
 pub fn claim_links(_ctx: &Ctx) -> Result<()> {
     set_handler(&format!("\"{}\" route \"%1\"", gui_command().display()), None)
 }

@@ -83,6 +83,27 @@ pub fn sync_shortcuts(ctx: &Ctx, name: &str) -> Result<Vec<PathBuf>> {
     }
 }
 
+/// After Claude Profile Hub updates, rebuilds the shortcuts (and the link handler) once, so
+/// changes to how they're made reach shortcuts made by an older version.
+pub fn refresh_after_update(ctx: &mut Ctx) {
+    if ctx.state.shortcuts_version.as_deref() == Some(crate::VERSION) {
+        return;
+    }
+    let first_run = ctx.state.shortcuts_version.is_none() && ctx.config.profiles.is_empty();
+    if !first_run {
+        for (n, e) in sync_all_shortcuts(ctx) {
+            eprintln!("note: shortcuts for {n}: {e:#}");
+        }
+        if ctx.config.settings.route_links {
+            if let Err(e) = platform::rebuild_link_handler(ctx) {
+                eprintln!("note: link handler: {e:#}");
+            }
+        }
+    }
+    ctx.state.shortcuts_version = Some(crate::VERSION.to_owned());
+    let _ = ctx.save_state();
+}
+
 /// Rebuilds every profile's shortcuts. Returns each failure with its profile name.
 pub fn sync_all_shortcuts(ctx: &Ctx) -> Vec<(String, anyhow::Error)> {
     ctx.config.profiles.iter().filter_map(|p| sync_shortcuts(ctx, &p.name).err().map(|e| (p.name.clone(), e))).collect()

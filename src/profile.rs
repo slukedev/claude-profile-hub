@@ -255,7 +255,6 @@ fn yes() -> bool {
     true
 }
 
-#[allow(clippy::trivially_copy_pass_by_ref)]
 fn is_true(b: &bool) -> bool {
     *b
 }
