@@ -62,8 +62,167 @@ pub fn export_app_icon(_app: &Path, _png: &Path) -> bool {
     false
 }
 
-pub fn own_app_copy(_paths: &Paths, _p: &Profile, _install: &Install) -> Result<Option<Install>> {
+/// Copies of Claude are a macOS thing; here the icon follows the taskbar identity.
+pub fn own_app_copy(_paths: &Paths, _p: &Profile, _install: &Install, _running: bool) -> Result<Option<Install>> {
     Ok(None)
+}
+
+/// Nothing to adopt: there are no per-profile copies of Claude here.
+pub fn adopt_updated_copy(_paths: &Paths, _install: &Install) -> Result<Option<i64>> {
+    Ok(None)
+}
+
+pub fn own_icon_env(_p: &Profile) -> Vec<(String, String)> {
+    Vec::new()
+}
+
+/// The taskbar identity (AppUserModelID) of a profile's windows and its shortcuts.
+fn app_id(p_name: &str) -> String {
+    format!("ClaudeProfileHub.Profile.{}", crate::profile::slug(p_name))
+}
+
+/// Interop for the two things PowerShell can't do on its own: setting a shortcut's
+/// AppUserModelID, and giving another program's windows an AppUserModelID, relaunch
+/// details and an icon. Compiled by Add-Type when a script needs it.
+const TASKBAR_CS: &str = r#"
+using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.Runtime.InteropServices;
+
+public static class CphTaskbar {
+  [StructLayout(LayoutKind.Sequential, Pack = 4)]
+  struct PropertyKey { public Guid Fmtid; public uint Pid; public PropertyKey(uint pid) { Fmtid = new Guid("9F4C2855-9F79-4B39-A8D0-E1D42DE1D5F3"); Pid = pid; } }
+
+  [StructLayout(LayoutKind.Explicit, Size = 24)]
+  struct PropVariant { [FieldOffset(0)] public ushort Vt; [FieldOffset(8)] public IntPtr Ptr; }
+
+  [ComImport, Guid("886D8EEB-8CF2-4446-8D02-CDBA1DBDCF99"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+  interface IPropertyStore {
+    [PreserveSig] int GetCount(out uint count);
+    [PreserveSig] int GetAt(uint index, out PropertyKey key);
+    [PreserveSig] int GetValue(ref PropertyKey key, out PropVariant value);
+    [PreserveSig] int SetValue(ref PropertyKey key, ref PropVariant value);
+    [PreserveSig] int Commit();
+  }
+
+  [DllImport("shell32.dll")] static extern int SHGetPropertyStoreForWindow(IntPtr hwnd, ref Guid iid, [MarshalAs(UnmanagedType.Interface)] out IPropertyStore store);
+  [DllImport("shell32.dll", CharSet = CharSet.Unicode)] static extern int SHGetPropertyStoreFromParsingName(string path, IntPtr bc, int flags, ref Guid iid, [MarshalAs(UnmanagedType.Interface)] out IPropertyStore store);
+  [DllImport("ole32.dll")] static extern int PropVariantClear(ref PropVariant pv);
+  delegate bool EnumProc(IntPtr hwnd, IntPtr lParam);
+  [DllImport("user32.dll")] static extern bool EnumWindows(EnumProc proc, IntPtr lParam);
+  [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr hwnd, out uint pid);
+  [DllImport("user32.dll")] static extern IntPtr GetWindow(IntPtr hwnd, uint cmd);
+  [DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern IntPtr LoadImage(IntPtr inst, string name, uint type, int cx, int cy, uint flags);
+  [DllImport("user32.dll")] static extern int GetSystemMetrics(int index);
+  [DllImport("user32.dll")] static extern IntPtr SendMessageTimeout(IntPtr hwnd, uint msg, IntPtr w, IntPtr l, uint flags, uint timeout, out IntPtr result);
+
+  const uint ID = 5, RELAUNCH_COMMAND = 2, RELAUNCH_ICON = 3, RELAUNCH_NAME = 4;
+  static Guid StoreIid = new Guid("886D8EEB-8CF2-4446-8D02-CDBA1DBDCF99");
+
+  static string Get(IPropertyStore store, uint pid) {
+    var key = new PropertyKey(pid);
+    PropVariant v;
+    if (store.GetValue(ref key, out v) != 0) return null;
+    string s = v.Vt == 31 ? Marshal.PtrToStringUni(v.Ptr) : null;
+    PropVariantClear(ref v);
+    return s;
+  }
+
+  static void Set(IPropertyStore store, uint pid, string value) {
+    var key = new PropertyKey(pid);
+    var v = new PropVariant { Vt = 31, Ptr = Marshal.StringToCoTaskMemUni(value) };
+    store.SetValue(ref key, ref v);
+    PropVariantClear(ref v);
+  }
+
+  public static void SetShortcutId(string lnk, string id) {
+    IPropertyStore store;
+    if (SHGetPropertyStoreFromParsingName(lnk, IntPtr.Zero, 2, ref StoreIid, out store) != 0) return;
+    Set(store, ID, id);
+    store.Commit();
+    Marshal.ReleaseComObject(store);
+  }
+
+  static List<IntPtr> TopWindows(uint pid) {
+    var found = new List<IntPtr>();
+    EnumWindows((h, l) => {
+      uint owner;
+      GetWindowThreadProcessId(h, out owner);
+      if (owner == pid && GetWindow(h, 4) == IntPtr.Zero) found.Add(h);
+      return true;
+    }, IntPtr.Zero);
+    return found;
+  }
+
+  // Keeps the profile's windows on its own taskbar identity and icon until it quits.
+  // Claude can make new windows (or reset these) at any time, so this keeps checking.
+  public static void Watch(int pid, string id, string command, string name, string ico) {
+    Process proc;
+    try { proc = Process.GetProcessById(pid); } catch (ArgumentException) { return; }
+    IntPtr big = LoadImage(IntPtr.Zero, ico, 1, GetSystemMetrics(11), GetSystemMetrics(12), 0x10);
+    IntPtr small = LoadImage(IntPtr.Zero, ico, 1, GetSystemMetrics(49), GetSystemMetrics(50), 0x10);
+    var started = DateTime.UtcNow;
+    do {
+      foreach (var h in TopWindows((uint)pid)) {
+        IPropertyStore store;
+        if (SHGetPropertyStoreForWindow(h, ref StoreIid, out store) == 0) {
+          if (Get(store, ID) != id) {
+            // The relaunch details go first: the taskbar reads them when the ID changes.
+            Set(store, RELAUNCH_COMMAND, command);
+            Set(store, RELAUNCH_NAME, name);
+            Set(store, RELAUNCH_ICON, ico + ",0");
+            Set(store, ID, id);
+          }
+          Marshal.ReleaseComObject(store);
+        }
+        IntPtr current;
+        SendMessageTimeout(h, 0x7F, (IntPtr)1, IntPtr.Zero, 2, 1000, out current);
+        if (big != IntPtr.Zero && current != big) {
+          SendMessageTimeout(h, 0x80, (IntPtr)1, big, 2, 1000, out current);
+          if (small != IntPtr.Zero) SendMessageTimeout(h, 0x80, IntPtr.Zero, small, 2, 1000, out current);
+        }
+      }
+      // Quick at first, while Claude opens its windows, then at a slower pace.
+    } while (!proc.WaitForExit((DateTime.UtcNow - started).TotalSeconds < 60 ? 500 : 3000));
+  }
+}
+"#;
+
+/// Finds the profile's Claude process and keeps its windows on the profile's taskbar
+/// identity and icon until it quits. One per profile, thanks to the mutex.
+const WATCH_PS: &str = r#"
+$m = New-Object System.Threading.Mutex($false, 'Local\ClaudeProfileHubIcon-' + $env:CPH_ID)
+if (-not $m.WaitOne(0)) { exit }
+Add-Type -TypeDefinition $env:CPH_CS
+$want = '--user-data-dir=' + $env:CPH_DIR
+$deadline = (Get-Date).AddSeconds(60)
+while ((Get-Date) -lt $deadline) {
+  $p = Get-CimInstance Win32_Process -Filter ("Name='" + $env:CPH_EXE + "'") |
+    Where-Object { $_.CommandLine -and $_.CommandLine.Contains($want) -and -not $_.CommandLine.Contains('--type=') } |
+    Sort-Object CreationDate | Select-Object -First 1
+  if ($p) { [CphTaskbar]::Watch([int]$p.ProcessId, $env:CPH_ID, $env:CPH_CMD, $env:CPH_NAME, $env:CPH_ICO); break }
+  Start-Sleep -Milliseconds 500
+}
+"#;
+
+/// Starts a hidden helper that gives the profile's windows its own taskbar identity
+/// (grouped with its Start menu shortcut, which carries the same ID) and its icon. Without
+/// it Windows groups every profile under Claude and shows Claude's icon.
+pub fn show_own_icon(ctx: &Ctx, p: &Profile, install: &Install) -> Result<()> {
+    let set = icons::write_for_ctx(ctx, p)?;
+    let exe_name = install.exe.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    let command = format!("\"{}\" launch \"{}\"", gui_command().display(), p.name);
+    let mut cmd = Command::new("powershell.exe");
+    cmd.args(["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", WATCH_PS])
+        .env("CPH_CS", TASKBAR_CS)
+        .env("CPH_ID", app_id(&p.name))
+        .env("CPH_DIR", p.data_dir.as_os_str())
+        .env("CPH_EXE", exe_name.replace('\'', ""))
+        .env("CPH_CMD", command)
+        .env("CPH_NAME", shortcut_title(&p.name))
+        .env("CPH_ICO", set.ico.as_os_str());
+    spawn_detached(&mut cmd)
 }
 
 const PICK_PS: &str = r#"
@@ -106,9 +265,13 @@ $s.IconLocation = $env:CPH_ICON + ',0'
 $s.Description = $env:CPH_DESC
 $s.WorkingDirectory = $env:CPH_WD
 $s.Save()
+# The same taskbar identity as the profile's windows, so the running Claude groups with
+# this shortcut (and a pinned copy of it) and shows its icon.
+Add-Type -TypeDefinition $env:CPH_CS
+[CphTaskbar]::SetShortcutId($env:CPH_LNK, $env:CPH_ID)
 "#;
 
-fn write_lnk(lnk: &Path, target: &Path, args: &str, icon: &Path, desc: &str) -> Result<()> {
+fn write_lnk(lnk: &Path, target: &Path, args: &str, icon: &Path, desc: &str, id: &str) -> Result<()> {
     let wd = target.parent().unwrap_or(target);
     powershell(
         LNK_PS,
@@ -119,6 +282,8 @@ fn write_lnk(lnk: &Path, target: &Path, args: &str, icon: &Path, desc: &str) -> 
             ("CPH_ICON", &icon.to_string_lossy()),
             ("CPH_DESC", desc),
             ("CPH_WD", &wd.to_string_lossy()),
+            ("CPH_CS", TASKBAR_CS),
+            ("CPH_ID", id),
         ],
     )
     .map(drop)
@@ -141,7 +306,7 @@ pub fn install_shortcuts(ctx: &Ctx, p: &Profile) -> Result<Vec<PathBuf>> {
         let lnk = dir.join(lnk_name(&p.name));
         if wanted {
             std::fs::create_dir_all(&dir)?;
-            write_lnk(&lnk, &target, &args, &set.ico, &desc)?;
+            write_lnk(&lnk, &target, &args, &set.ico, &desc, &app_id(&p.name))?;
             made.push(lnk);
         } else {
             remove_quietly(&lnk);

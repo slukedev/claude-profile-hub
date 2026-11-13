@@ -42,8 +42,41 @@ pub fn export_app_icon(_app: &Path, _png: &Path) -> bool {
     false
 }
 
-pub fn own_app_copy(_paths: &Paths, _p: &Profile, _install: &Install) -> Result<Option<Install>> {
+/// Copies of Claude are a macOS thing; elsewhere the icon follows the app ID.
+pub fn own_app_copy(_paths: &Paths, _p: &Profile, _install: &Install, _running: bool) -> Result<Option<Install>> {
     Ok(None)
+}
+
+/// Nothing to adopt: there are no per-profile copies of Claude here.
+pub fn adopt_updated_copy(_paths: &Paths, _install: &Install) -> Result<Option<i64>> {
+    Ok(None)
+}
+
+/// Electron takes its Wayland app ID from `CHROME_DESKTOP` (the desktop entry's file name).
+/// Docks, task switchers and window lists find a window's desktop entry by that ID, and
+/// show that entry's icon, so pointing it at the profile's entry gives the running Claude
+/// the profile's icon instead of Claude's.
+pub fn own_icon_env(p: &Profile) -> Vec<(String, String)> {
+    vec![("CHROME_DESKTOP".to_owned(), entry_name(&p.name))]
+}
+
+/// Makes sure the desktop entry the app ID points at exists. With app launcher shortcuts
+/// turned off it's written hidden from menus, so it only lends the running Claude its icon.
+pub fn show_own_icon(ctx: &Ctx, p: &Profile, _install: &Install) -> Result<()> {
+    let dir = applications_dir().context("no data folder")?;
+    let file = dir.join(entry_name(&p.name));
+    if file.exists() {
+        return Ok(());
+    }
+    let set = icons::write_for_ctx(ctx, p)?;
+    let mut body = desktop_entry(p, &set.png);
+    if !ctx.config.settings.app_shortcuts {
+        body.push_str("NoDisplay=true\n");
+    }
+    std::fs::create_dir_all(&dir)?;
+    std::fs::write(&file, body)?;
+    refresh_menu();
+    Ok(())
 }
 
 fn has(tool: &str) -> bool {
@@ -129,12 +162,19 @@ pub fn install_shortcuts(ctx: &Ctx, p: &Profile) -> Result<Vec<PathBuf>> {
     let set = icons::write_for_ctx(ctx, p)?;
     let body = desktop_entry(p, &set.png);
     let mut made = Vec::new();
-    for (dir, wanted) in [(applications_dir(), settings.app_shortcuts), (desktop_dir(), settings.desktop_shortcuts)] {
+    // The running Claude borrows its icon from the app launcher entry (see own_icon_env),
+    // so with launcher shortcuts off the entry stays, hidden from menus.
+    let hidden = format!("{body}NoDisplay=true\n");
+    let menu_body = if settings.app_shortcuts { &body } else { &hidden };
+    let menu_wanted = settings.app_shortcuts || p.own_app;
+    for (dir, wanted, body) in
+        [(applications_dir(), menu_wanted, menu_body), (desktop_dir(), settings.desktop_shortcuts, &body)]
+    {
         let Some(dir) = dir else { continue };
         let file = dir.join(entry_name(&p.name));
         if wanted {
             std::fs::create_dir_all(&dir)?;
-            std::fs::write(&file, &body)?;
+            std::fs::write(&file, body)?;
             make_executable(&file)?;
             // GNOME won't run a Desktop launcher until it's marked trusted.
             let _ = Command::new("gio")
@@ -144,7 +184,9 @@ pub fn install_shortcuts(ctx: &Ctx, p: &Profile) -> Result<Vec<PathBuf>> {
                 .stdout(Stdio::null())
                 .stderr(Stdio::null())
                 .status();
-            made.push(file);
+            if !body.contains("NoDisplay=true") {
+                made.push(file);
+            }
         } else {
             remove_quietly(&file);
         }
@@ -172,7 +214,8 @@ pub fn existing_shortcuts(name: &str) -> Vec<PathBuf> {
         .into_iter()
         .flatten()
         .map(|d| d.join(entry_name(name)))
-        .filter(|p| p.exists())
+        // A hidden entry is only there to give the running Claude its icon.
+        .filter(|p| std::fs::read_to_string(p).is_ok_and(|s| !s.contains("NoDisplay=true")))
         .collect()
 }
 

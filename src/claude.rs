@@ -132,7 +132,7 @@ fn mac_bundle_exe(app: &Path) -> Option<PathBuf> {
     if named.is_file() {
         return Some(named);
     }
-    // A renamed copy (own-app) keeps the binary name, but be lenient anyway.
+    // A renamed copy (a profile's own copy) keeps the binary name, but be lenient anyway.
     std::fs::read_dir(&macos).ok()?.flatten().map(|e| e.path()).find(|p| p.is_file())
 }
 
@@ -144,6 +144,11 @@ fn mac_bundle_version(app: &Path) -> Option<String> {
     let start = rest.find("<string>")? + "<string>".len();
     let end = rest[start..].find("</string>")?;
     Some(rest[start..start + end].trim().to_owned())
+}
+
+/// A version string as numbers, for comparing: "1.10.2" sorts after "1.9.0".
+pub fn version_key(v: &str) -> Vec<u32> {
+    v.split(['.', '-', '+']).map_while(|part| part.parse().ok()).collect()
 }
 
 /// Squirrel installs keep each version in an `app-X.Y.Z` folder beside the stub.
@@ -165,6 +170,13 @@ fn windows_version(exe: &Path) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn version_key_compares_numerically() {
+        assert!(version_key("1.10.2") > version_key("1.9.0"));
+        assert!(version_key("0.14.10") > version_key("0.14.9"));
+        assert_eq!(version_key("1.2.3-beta.1"), vec![1, 2, 3]);
+    }
 
     #[test]
     fn from_path_reads_mac_bundle_version() {

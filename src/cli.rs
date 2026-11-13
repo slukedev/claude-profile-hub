@@ -92,8 +92,9 @@ pub enum Cmd {
         unset_env: Vec<String>,
         #[arg(long)]
         notes: Option<String>,
-        /// macOS: run from its own copy of Claude so the Dock shows this profile's icon
-        #[arg(long)]
+        /// Show this profile's icon on its running Claude (Dock, taskbar, app switcher). On
+        /// by default; on macOS it runs from a private copy of Claude.app
+        #[arg(long = "own-icon", visible_alias = "own-app")]
         own_app: Option<Switch>,
     },
     /// Sign a profile out by moving its data folder to the trash
@@ -422,9 +423,6 @@ fn edit(
         p.notes = n;
     }
     if let Some(s) = own_app {
-        if !cfg!(target_os = "macos") {
-            bail!("own-app is a macOS feature");
-        }
         p.own_app = matches!(s, Switch::On);
     }
     let real = p.name.clone();

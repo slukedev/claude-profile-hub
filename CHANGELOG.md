@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- A running profile now shows its own icon in the Dock, taskbar or app switcher, not only
+  while its shortcut opens it, on macOS, Windows and Linux. On by default for every profile;
+  `edit <name> --own-icon off` turns it off (`--own-app` still works)
+- macOS: when Claude updates itself from a profile's own copy, the new version is put in place
+  of Claude.app so the other profiles follow it
+
 ## 0.1.0
 
 First release, for macOS, Windows and Linux.

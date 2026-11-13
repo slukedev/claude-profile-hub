@@ -220,12 +220,22 @@ pub fn focus(pid: u32, url: Option<&str>) -> Result<bool> {
     }
 }
 
+fn copies_dir(paths: &Paths) -> PathBuf {
+    paths.support_dir.join("apps")
+}
+
 /// Runs the profile from its own APFS clone of Claude.app with the profile's icon, so the
-/// Dock and the app switcher show which profile is which. The clone is unmodified, so
-/// Anthropic's signature stays valid; the icon is a Finder custom icon outside the seal.
-pub fn own_app_copy(paths: &Paths, p: &Profile, install: &Install) -> Result<Option<Install>> {
-    let dir = paths.support_dir.join("apps").join(p.slug());
+/// Dock and the app switcher show which profile is which while it runs (a Dock tile shows
+/// the icon of the app bundle the process runs from, so a shortcut alone can't do this).
+/// The clone is unmodified, so Anthropic's signature stays valid; the icon is a Finder
+/// custom icon outside the seal. `running`: the profile is already open from its copy, so
+/// the copy is used as it is rather than replaced under it.
+pub fn own_app_copy(paths: &Paths, p: &Profile, install: &Install, running: bool) -> Result<Option<Install>> {
+    let dir = copies_dir(paths).join(p.slug());
     let dest = dir.join(format!("{}.app", shortcut_title(&p.name)));
+    if running {
+        return Ok(dest.exists().then(|| Install::from_path(&dest)).flatten());
+    }
     std::fs::create_dir_all(&dir)?;
     // Any older copy (from before a rename) is replaced.
     for e in std::fs::read_dir(&dir)?.flatten() {
@@ -259,6 +269,70 @@ pub fn own_app_copy(paths: &Paths, p: &Profile, install: &Install) -> Result<Opt
     let set = icons::write_for(&paths.icons_dir(), p, source.as_ref())?;
     let _ = jxa(SETICON_JS, &[&set.icns.to_string_lossy(), &dest.to_string_lossy()]);
     Ok(Install::from_path(&dest))
+}
+
+/// The Dock icon comes from the profile's own copy of the app, set up before it starts.
+pub fn own_icon_env(_p: &Profile) -> Vec<(String, String)> {
+    Vec::new()
+}
+
+/// Nothing to do once it's started: the copy it runs from already carries the icon.
+pub fn show_own_icon(_ctx: &Ctx, _p: &Profile, _install: &Install) -> Result<()> {
+    Ok(())
+}
+
+/// Claude's updater replaces the bundle it runs from, so an update started in a profile
+/// that runs from its own copy updates only that copy. When a copy is newer than Claude.app,
+/// this puts it in Claude.app's place (an APFS clone again, without our custom icon), so
+/// Claude.app and every other profile move to the new version too. Returns when the updater
+/// installed it, in Unix seconds, or None when no copy is newer.
+pub fn adopt_updated_copy(paths: &Paths, install: &Install) -> Result<Option<i64>> {
+    let Some(current) = install.version.as_deref().map(crate::claude::version_key) else { return Ok(None) };
+    let mut newest: Option<(Vec<u32>, PathBuf)> = None;
+    let Ok(profiles) = std::fs::read_dir(copies_dir(paths)) else { return Ok(None) };
+    for app in profiles.flatten().filter_map(|d| std::fs::read_dir(d.path()).ok()).flatten().flatten() {
+        let path = app.path();
+        let hidden = path.file_name().is_some_and(|n| n.to_string_lossy().starts_with('.'));
+        if hidden || path.extension().is_none_or(|x| x != "app") {
+            continue;
+        }
+        let Some(v) = Install::from_path(&path).and_then(|i| i.version).map(|v| crate::claude::version_key(&v)) else {
+            continue;
+        };
+        if v > current && newest.as_ref().is_none_or(|(n, _)| v > *n) {
+            newest = Some((v, path));
+        }
+    }
+    let Some((_, copy)) = newest else { return Ok(None) };
+    let updated_at = std::fs::metadata(&copy)
+        .and_then(|m| m.created())
+        .ok()
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .and_then(|d| i64::try_from(d.as_secs()).ok())
+        .unwrap_or_else(crate::config::now);
+
+    let parent = install.app.parent().context("Claude.app has no parent folder")?;
+    let tmp = parent.join(".Claude Profile Hub update.app");
+    let old = parent.join(".Claude Profile Hub previous.app");
+    remove_quietly(&tmp);
+    remove_quietly(&old);
+    if !Command::new("cp").arg("-cR").arg(&copy).arg(&tmp).status().is_ok_and(|s| s.success()) {
+        remove_quietly(&tmp);
+        bail!("couldn't copy {} next to {}", copy.display(), install.app.display());
+    }
+    // Drop the profile's custom icon (a Finder flag and an `Icon\r` file) so Claude.app
+    // keeps Claude's own icon.
+    remove_quietly(&tmp.join("Icon\r"));
+    let _ = Command::new("xattr").arg("-c").arg(&tmp).status();
+    std::fs::rename(&install.app, &old).with_context(|| format!("couldn't replace {}", install.app.display()))?;
+    if let Err(e) = std::fs::rename(&tmp, &install.app) {
+        let _ = std::fs::rename(&old, &install.app);
+        remove_quietly(&tmp);
+        return Err(e).with_context(|| format!("couldn't replace {}", install.app.display()));
+    }
+    remove_quietly(&old);
+    let _ = Command::new(LSREGISTER).arg("-f").arg(&install.app).status();
+    Ok(Some(updated_at))
 }
 
 pub fn pick(prompt: &str, options: &[String], preselect: &str) -> Pick {

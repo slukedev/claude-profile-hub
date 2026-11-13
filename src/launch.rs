@@ -1,5 +1,6 @@
 //! Opening a profile (or bringing it back), routing `claude://` links, and stopping.
 
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::Path;
 use std::process::{Command, Stdio};
@@ -35,9 +36,8 @@ pub fn claude_args(global: &[String], profile: Option<&Profile>) -> Vec<String> 
 pub fn launch(ctx: &mut Ctx, name: &str, url: Option<&str>) -> Result<Outcome> {
     // Claude may have updated since the last launch; bring the other profiles along first.
     // (Relaunches from here find the version already recorded, so this doesn't recurse.)
-    if ctx.config.settings.follow_claude_updates {
-        let _ = crate::follow::check(ctx, None);
-    }
+    // This also picks up an update Claude installed into a profile's own copy of the app.
+    let _ = crate::follow::check(ctx, None);
     let install = ctx.require_claude()?;
     let profile = match ctx.target(name)? {
         Target::Default => None,
@@ -53,14 +53,24 @@ pub fn launch(ctx: &mut Ctx, name: &str, url: Option<&str>) -> Result<Outcome> {
             if let Some(p) = &profile {
                 fs::create_dir_all(&p.data_dir).with_context(|| format!("couldn't create {}", p.data_dir.display()))?;
                 if p.own_app {
-                    if let Some(copy) = platform::own_app_copy(&ctx.paths, p, &install)? {
+                    if let Some(copy) = platform::own_app_copy(&ctx.paths, p, &install, pid.is_some())? {
                         install = copy;
                     }
                 }
             }
             let args = claude_args(&ctx.config.settings.global_args, profile.as_ref());
-            let env = profile.as_ref().map(|p| p.env.clone()).unwrap_or_default();
+            let mut env = BTreeMap::new();
+            if let Some(p) = profile.as_ref().filter(|p| p.own_app) {
+                env.extend(platform::own_icon_env(p));
+            }
+            // The profile's own variables win.
+            env.extend(profile.as_ref().map(|p| p.env.clone()).unwrap_or_default());
             platform::start(&install, &args, &env, url)?;
+            if let Some(p) = profile.as_ref().filter(|p| p.own_app) {
+                if let Err(e) = platform::show_own_icon(ctx, p, &install) {
+                    eprintln!("note: couldn't give {} its own icon while it runs: {e:#}", p.name);
+                }
+            }
             if pid.is_some() { Outcome::Focused } else { Outcome::Started }
         }
     };
@@ -217,7 +227,7 @@ mod tests {
             created: 0,
             last_used: 0,
             launches: 0,
-            own_app: false,
+            own_app: true,
         };
         let args = claude_args(&["--disable-gpu".into()], Some(&p));
         assert_eq!(args, ["--disable-gpu", "--user-data-dir=/d/work", "--lang=en"]);

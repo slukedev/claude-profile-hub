@@ -212,7 +212,7 @@ impl Config {
             created: now(),
             last_used: 0,
             launches: 0,
-            own_app: false,
+            own_app: true,
         });
         let last = self.profiles.len() - 1;
         Ok(&mut self.profiles[last])

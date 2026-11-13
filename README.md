@@ -90,9 +90,20 @@ claude-profile-hub update
   starts, so with several profiles a browser sign-in or connector callback lands in whichever one
   started last. Turn on link routing and those links ask which profile they're for (or go to the
   last-used or default profile, if you prefer).
-- **Own Dock icon on macOS.** Optionally run a profile from its own copy of Claude.app (an APFS
-  clone that takes almost no space and keeps Anthropic's signature), so the Dock and app switcher
-  show that profile's icon while it runs.
+- **The profile's icon while it runs, too.** A running profile shows its own icon in the Dock,
+  taskbar or app switcher, not just on its shortcut, and each profile gets its own spot there.
+  - macOS: a Dock tile always shows the icon of the app the process runs from, so each profile
+    runs from its own copy of Claude.app (an APFS clone that takes almost no space and keeps
+    Anthropic's signature) carrying the profile's icon. If Claude updates itself from a profile,
+    the update lands in that copy, so it's copied over Claude.app and the other profiles follow.
+  - Windows: each profile's windows get their own taskbar identity (AppUserModelID), shared with
+    its Start menu shortcut, plus the profile's window icon. A small hidden helper keeps them
+    that way until the profile quits.
+  - Linux: each profile runs with its own app ID (Electron's `CHROME_DESKTOP`), which docks and
+    app switchers match to the profile's launcher entry and its icon. This works on Wayland; on
+    X11 it depends on the desktop.
+
+  Turn it off for a profile with `claude-profile-hub edit <name> --own-icon off`.
 - **Per-profile flags and environment variables**, plus flags for every profile.
 - **Nothing gets deleted outright.** Signing out and removing data move folders to the system
   trash, so a mistake can be undone.

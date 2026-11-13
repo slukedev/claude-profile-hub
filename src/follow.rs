@@ -14,6 +14,7 @@ use anyhow::Result;
 use crate::config::now;
 use crate::ctx::{Ctx, DEFAULT_NAME};
 use crate::launch;
+use crate::platform;
 use crate::process::{Owner, Running, dir_key};
 
 /// How long after an update a freshly started default profile is taken to be the
@@ -65,10 +66,24 @@ pub struct Followed {
 /// update (it's gone now) and bring it back.
 pub fn check(ctx: &mut Ctx, previous: Option<&Running>) -> Result<Followed> {
     let mut done = Followed::default();
+    let Some(mut install) = ctx.claude() else { return Ok(done) };
+    // Claude's updater replaces the app it runs from, so an update started from a profile
+    // running on its own copy lands in that copy. Put it in place of Claude itself, and
+    // date the update from when the updater installed it.
+    let adopted_at = match platform::adopt_updated_copy(&ctx.paths, &install) {
+        Ok(Some(at)) => {
+            install = ctx.claude().unwrap_or(install);
+            Some(at)
+        }
+        Ok(None) => None,
+        Err(e) => {
+            eprintln!("note: Claude updated in a profile's copy, but it couldn't be put in place: {e:#}");
+            None
+        }
+    };
     if !ctx.config.settings.follow_claude_updates {
         return Ok(done);
     }
-    let Some(install) = ctx.claude() else { return Ok(done) };
     let Some(version) = install.version.clone() else { return Ok(done) };
     let known = ctx.state.claude_version.replace(version.clone());
     if known.as_deref() == Some(version.as_str()) {
@@ -80,7 +95,7 @@ pub fn check(ctx: &mut Ctx, previous: Option<&Running>) -> Result<Followed> {
         return Ok(done);
     }
     done.version = Some(version);
-    let installed_at = install.installed_at().unwrap_or_else(now);
+    let installed_at = adopted_at.or_else(|| install.installed_at()).unwrap_or_else(now);
     let exe = Some(install.exe.as_path());
     let running = Running::scan(exe);
     let old = stale(ctx, &running, installed_at);

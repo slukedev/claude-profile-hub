@@ -243,9 +243,21 @@ pub struct Profile {
     pub last_used: i64,
     #[serde(default)]
     pub launches: u64,
-    /// macOS: run from a private copy of Claude.app so the Dock shows this profile's icon.
-    #[serde(default)]
+    /// Show this profile's icon on its running Claude, not Claude's own: in the Dock (macOS,
+    /// from a private copy of Claude.app), the taskbar (Windows) or the dock and app
+    /// switcher (Linux). On unless turned off. The key is new so that the old opt-in
+    /// `own_app = false` written into every existing profile doesn't turn it off.
+    #[serde(rename = "own_icon", default = "yes", skip_serializing_if = "is_true")]
     pub own_app: bool,
+}
+
+fn yes() -> bool {
+    true
+}
+
+#[allow(clippy::trivially_copy_pass_by_ref)]
+fn is_true(b: &bool) -> bool {
+    *b
 }
 
 fn default_color_name() -> String {
@@ -322,6 +334,20 @@ mod tests {
     fn default_badge_maps_common_names() {
         assert_eq!(default_badge("Work"), Badge::Symbol("work"));
         assert_eq!(default_badge("acme"), Badge::Letter('A'));
+    }
+
+    #[test]
+    fn own_icon_is_on_for_old_configs_and_its_opt_out_round_trips() {
+        // Earlier versions wrote the old opt-in as `own_app = false` into every profile.
+        let old: Profile = toml::from_str("name = \"Work\"\ndata_dir = \"/w\"\nown_app = false\n").expect("parse");
+        assert!(old.own_app);
+        let mut p = old;
+        p.own_app = false;
+        let text = toml::to_string(&p).expect("write");
+        assert!(text.contains("own_icon = false"));
+        assert!(!toml::from_str::<Profile>(&text).expect("parse").own_app);
+        p.own_app = true;
+        assert!(!toml::to_string(&p).expect("write").contains("own_icon"));
     }
 
     #[test]

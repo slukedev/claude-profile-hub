@@ -291,8 +291,8 @@ fn draw_details(f: &mut Frame<'_>, app: &App, t: &Theme, target: &Target<'_>, ar
                 let env: Vec<String> = p.env.iter().map(|(k, v)| format!("{k}={v}")).collect();
                 lines.push(kv("Environment", Span::raw(env.join(" ")), t));
             }
-            if cfg!(target_os = "macos") && p.own_app {
-                lines.push(kv("Dock icon", Span::raw("its own, from a private copy of Claude"), t));
+            if !p.own_app {
+                lines.push(kv("While running", Span::raw("shows Claude's icon"), t));
             }
             let shortcuts = crate::platform::existing_shortcuts(&p.name);
             let sc = if shortcuts.is_empty() {

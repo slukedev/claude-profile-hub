@@ -89,11 +89,7 @@ pub enum Field {
 
 impl Field {
     pub fn all() -> Vec<Self> {
-        let mut v = vec![Self::Name, Self::Color, Self::Badge, Self::Args, Self::Env, Self::Notes, Self::Default];
-        if cfg!(target_os = "macos") {
-            v.push(Self::OwnApp);
-        }
-        v
+        vec![Self::Name, Self::Color, Self::Badge, Self::Args, Self::Env, Self::Notes, Self::OwnApp, Self::Default]
     }
 
     pub fn label(self) -> &'static str {
@@ -104,7 +100,7 @@ impl Field {
             Self::Args => "Extra flags for Claude",
             Self::Env => "Environment variables",
             Self::Notes => "Notes",
-            Self::OwnApp => "Own Dock icon while running",
+            Self::OwnApp => "Own icon while running",
             Self::Default => "Make this the default profile",
         }
     }
@@ -788,9 +784,9 @@ impl App {
                 let r = self.ctx.save();
                 self.report(r, |()| {
                     if on {
-                        format!("{name} will run from its own copy of Claude, with its own Dock icon. Takes effect next time it opens.")
+                        format!("{name} will show its own icon while it runs. Takes effect next time it opens.")
                     } else {
-                        format!("{name} will run from Claude.app.")
+                        format!("{name} will show Claude's icon while it runs. Takes effect next time it opens.")
                     }
                 });
             }

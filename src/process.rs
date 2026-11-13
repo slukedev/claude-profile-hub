@@ -47,8 +47,16 @@ pub fn classify(exe: Option<&Path>, cmd: &[String], claude_exe: Option<&Path>) -
     let is_desktop = match claude_exe {
         Some(c) => same_file(exe, c),
         None => false,
-    } || exe.to_string_lossy().contains("Claude.app/Contents/MacOS/");
+    } || is_mac_claude(exe);
     is_desktop.then_some(Owner::Default)
+}
+
+/// Claude.app's main binary, or the same binary in a profile's own copy of the app
+/// (`Claude Work.app`), which Claude's updater reopens without a data folder.
+fn is_mac_claude(exe: &Path) -> bool {
+    exe.file_name().is_some_and(|n| n == "Claude")
+        && exe.parent().is_some_and(|d| d.ends_with("Contents/MacOS"))
+        && exe.ancestors().nth(3).is_some_and(|app| app.extension().is_some_and(|x| x == "app"))
 }
 
 fn same_file(a: &Path, b: &Path) -> bool {
@@ -186,5 +194,15 @@ mod tests {
     fn classify_recognizes_default_profile_on_mac() {
         let exe = Path::new("/Applications/Claude.app/Contents/MacOS/Claude");
         assert_eq!(classify(Some(exe), &cmd(&["Claude"]), None), Some(Owner::Default));
+    }
+
+    #[test]
+    fn classify_recognizes_a_profile_copy_reopened_by_the_updater() {
+        let exe =
+            Path::new("/Users/me/Library/Application Support/hub/apps/work/Claude Work.app/Contents/MacOS/Claude");
+        assert_eq!(classify(Some(exe), &cmd(&["Claude"]), None), Some(Owner::Default));
+        let helper =
+            Path::new("/Applications/Claude.app/Contents/Frameworks/Claude Helper.app/Contents/MacOS/Claude Helper");
+        assert_eq!(classify(Some(helper), &cmd(&["Claude Helper"]), None), None);
     }
 }
