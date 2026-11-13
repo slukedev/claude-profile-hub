@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.0
+
+- The `migrate` command and the manager's import prompt are gone
+
 ## 0.2.1
 
 - macOS: opening a profile no longer shows two icons in the Dock. The shortcut that starts
