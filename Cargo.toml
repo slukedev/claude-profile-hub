@@ -1,6 +1,6 @@
 [package]
 name = "claude-profile-hub"
-version = "0.2.0"
+version = "0.2.1"
 edition = "2024"
 rust-version = "1.85"
 description = "Run separate Claude Desktop profiles side by side, each with its own login, chats and connectors"
