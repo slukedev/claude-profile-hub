@@ -1,10 +1,14 @@
 name: Release
 
-# Push a tag like v0.2.0 (matching Cargo.toml's version) to build every platform,
-# publish a GitHub release, and update Homebrew and winget.
+# Releases happen when Cargo.toml's version has no release yet: bump the version on main
+# (or push a matching tag like v0.2.0). This builds every platform, publishes the GitHub
+# release (creating the tag), and updates Homebrew and winget.
 on:
   push:
+    branches: [main]
+    paths: ["Cargo.toml", ".github/workflows/release.yml"]
     tags: ["v*"]
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -16,18 +20,32 @@ env:
 jobs:
   check-version:
     runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+      release: ${{ steps.v.outputs.release }}
     steps:
       - uses: actions/checkout@v5
-      - name: Tag matches Cargo.toml
+      - id: v
+        name: Decide whether this version needs a release
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           version=$(sed -n 's/^version = "\(.*\)"$/\1/p' Cargo.toml | head -1)
-          if [ "v$version" != "$GITHUB_REF_NAME" ]; then
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          if [ "$GITHUB_REF_TYPE" = tag ] && [ "v$version" != "$GITHUB_REF_NAME" ]; then
             echo "::error::Tag $GITHUB_REF_NAME doesn't match Cargo.toml version $version"
             exit 1
+          fi
+          if gh release view "v$version" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "v$version is already released; nothing to do."
+            echo "release=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "release=true" >> "$GITHUB_OUTPUT"
           fi
 
   build:
     needs: check-version
+    if: needs.check-version.outputs.release == 'true'
     strategy:
       fail-fast: false
       matrix:
@@ -71,7 +89,7 @@ jobs:
           path: dist/*
 
   release:
-    needs: build
+    needs: [check-version, build]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -88,13 +106,15 @@ jobs:
         working-directory: dist
         run: sha256sum * > SHA256SUMS && cat SHA256SUMS
       - id: v
-        run: echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+        run: echo "version=${{ needs.check-version.outputs.version }}" >> "$GITHUB_OUTPUT"
       - name: Publish
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          notes=$(awk -v v="${GITHUB_REF_NAME#v}" '$0 ~ "^## " v {on=1; next} /^## / {on=0} on' CHANGELOG.md)
-          gh release create "$GITHUB_REF_NAME" dist/* --verify-tag --title "$GITHUB_REF_NAME" --notes "${notes:-See CHANGELOG.md}"
+          v="${{ steps.v.outputs.version }}"
+          notes=$(awk -v v="$v" '$0 ~ "^## " v {on=1; next} /^## / {on=0} on' CHANGELOG.md)
+          # Creates the tag on this commit when it doesn't exist yet.
+          gh release create "v$v" dist/* --target "$GITHUB_SHA" --title "v$v" --notes "${notes:-See CHANGELOG.md}"
       - uses: actions/upload-artifact@v4
         with:
           name: checksums

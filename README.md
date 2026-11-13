@@ -167,12 +167,13 @@ cargo clippy --all-targets -- -D warnings
 cargo run --example icons icons.png   # renders every badge, for checking icon changes
 ```
 
-Releases: bump the version in `Cargo.toml`, add a section to `CHANGELOG.md`, and push a tag like
-`v0.2.0`. The Release workflow builds macOS (Apple silicon and Intel), Linux (x86_64 and arm64,
-static) and Windows (x64 and arm64), publishes the GitHub release with `SHA256SUMS`, updates the
-Homebrew tap, and opens the winget PR. It needs two secrets: `HOMEBREW_TAP_TOKEN` (push access
-to `slukedev/homebrew-tap`) and `WINGET_TOKEN`. The first winget version is submitted by hand; see
-[packaging/winget](packaging/winget/README.md).
+Releases: bump the version in `Cargo.toml`, add a section to `CHANGELOG.md`, and push to main.
+When that version has no release yet, the Release workflow builds macOS (Apple silicon and
+Intel), Linux (x86_64 and arm64, static) and Windows (x64 and arm64), publishes the GitHub
+release with `SHA256SUMS` (creating the `vX.Y.Z` tag), updates the Homebrew tap, and opens the
+winget PR. Pushing a matching tag works too. It needs two secrets: `HOMEBREW_TAP_TOKEN` (push
+access to `slukedev/homebrew-tap`) and `WINGET_TOKEN`. The first winget version is submitted by
+hand; see [packaging/winget](packaging/winget/README.md).
 
 ## License
 
